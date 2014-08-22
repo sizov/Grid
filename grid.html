@@ -1,0 +1,2375 @@
+<!DOCTYPE html>
+<!--
+	HTML5 High Performance Grid 
+
+	* 	GPU based, low CPU usage.
+
+	* 	2D canvas rendering, using double buffering and animation loop to control
+		frame rate.  
+
+	* 	Efficient 1 dimensional array storage for all cell values and headers.
+
+	* 	Fully virtualised cell rendering, effectively limitless rows/cols depending on
+		memory and requirements.
+
+	* 	Customisable cell rendering, fonts, colors, click, edit, and hover behavior.
+
+	* 	Animated and image based cell content.
+
+	* 	Full screen app style alpha blended overlay editing using rich DOM elements
+		form form behavior, input, and validation.
+
+
+	Company: 	OpenFin
+	 Author: 	Emerson Clarke
+	  Email: 	emerson@openfin.co, support@openfin.co
+	Website: 	http://openfin.co
+
+
+	The MIT License (MIT)
+
+	Copyright (c) 2014 OpenFin
+
+	Permission is hereby granted, free of charge, to any person obtaining a copy
+	of this software and associated documentation files (the "Software"), to deal
+	in the Software without restriction, including without limitation the rights
+	to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+	copies of the Software, and to permit persons to whom the Software is
+	furnished to do so, subject to the following conditions:
+
+	The above copyright notice and this permission notice shall be included in
+	all copies or substantial portions of the Software.
+
+	THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+	IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+	FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+	AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+	LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+	OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+	THE SOFTWARE.	
+-->
+
+<html>
+<head>
+	<title>OpenFin Grid</title>
+	<meta name="description" content="OpenFin Grid">
+
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<link rel="stylesheet" href="css/bootstrap.css" media="screen">
+	<link rel="stylesheet" href="css/main.css">
+	<style>
+
+	body {overflow:hidden;}
+
+
+	::-webkit-scrollbar {
+	      width: 10px;
+	      height: 10px;
+	      left: -10px;
+	} /* this disables the default scrollbar (compulsory) */
+
+	
+	::-webkit-scrollbar-track {
+	      /*background-color: #b46868;*/
+	      background-color: rgba(250, 250, 250, 0.1); 
+	} /* the new scrollbar will have a flat appearance with the set background color */
+	 
+	::-webkit-scrollbar-thumb {
+
+	      background-color: rgba(250, 250, 250, 0.5); 
+	      border-radius:10px;
+	} /* this will style the thumb, ignoring the track */
+	 
+	/*
+	::-webkit-scrollbar-button {
+	      background-color: rgba(250, 250, 250, 0.5); 
+	} *//* optionally, you can style the top and the bottom buttons (left and right for horizontal bars) */
+
+	::-webkit-scrollbar-corner {
+	      background-color: rgba(250, 250, 250, 0.1); 
+	} /* if both the vertical and the horizontal bars appear, then perhaps the right bottom corner also needs to be styled */
+
+	</style>
+
+</head>
+<body>
+
+
+
+<div id="wrapper" style="position:absolute;top:20px;left:20px;right:20px;bottom:20px;overflow:scroll;">
+
+<div id="view" style="position:absolute;top:0px;left:0px;background:black;">
+<canvas id="render" style="position:absolute;top:0px;left:0px;"></canvas>
+</div>
+
+</div>
+
+
+
+<div id="editor" style="visibility:hidden;position:absolute;left:0;top:0;z-index:-1;border-radius:10px;background:red;">
+
+<table cellpadding="10" height="100%" width="100%" border="0" ><tr><td height="100%" valign="middle" align="center">
+
+
+	<div id="edit-text" style="display:none;">
+	<br>
+	<input id="edit-text-input" type="text" class="input-medium edit-text" style="width:200px;"/>
+	</div>
+
+	<div id="edit-nav" style="display:none;">
+	<br>
+	<button type="button" class="btn btn-primary">&lt;&lt;</button>
+	<button type="button" class="btn">&gt;&gt;</button>
+	</div>
+
+	<div id="edit-select" style="display:none;">
+	<br>
+	<select id="edit-select-select" class="form-control">
+	  <option>1</option>
+	  <option>2</option>
+	  <option>3</option>
+	  <option>4</option>
+	  <option>5</option>
+	</select>
+	</div>
+
+
+	<div id="edit-tick" style="display:none;">
+	<button id="edit-tick-up" type="button" class="btn btn-primary" style="width:50px">+</button>
+	<button id="edit-tick-down" type="button" class="btn" style="width:50px">-</button>
+	</div>
+
+
+	<!--<div id="edit-confirm" style="display:none;">-->
+	<div id="edit-confirm">
+	<table cellspacing="0" cellpadding="0" width="100%">
+	<tr>
+	<td><button id="edit-confirm-cancel" type="button" class="btn btn-danger" style="width:100px">Cancel</button></td>
+	<td align="right"><button id="edit-confirm-ok" type="submit" class="btn btn-success" style="width:100px">Ok</button></td>
+	</tr>
+	</table>
+	</div>
+
+</tr></td></table>
+</div>
+
+
+
+<img id="glyphs" src="img/glyphicons-halflings.png" style="visibility:hidden;">
+
+
+<script src="js/jquery.js"></script>
+<!--<script src="js/jquery.mousewheel.js"></script>-->
+<script src="js/bootstrap.js"></script>
+
+<script>
+
+"use strict";
+
+(function() {
+
+	// We want to handle mouse wheel and zoom outside of chromes normal zooming so we can scale the resolution
+	// of the grid independently of the widgets/controls
+	// http://stackoverflow.com/questions/6775168/zooming-with-canvas
+
+	var scale = 1.0;
+	var gridlineSize = 1;
+
+	var rows = 5000;
+	var cols = 100;
+
+	// There is one cell type per column, any row/column specific information is stored in
+	// the values array.  This first cell is null becuase index 0 is the header.  
+
+	// Header specific info like width/height, style, and behavior objects can be stored in the values
+	// array at index 0 for row/col.
+
+	var values = [];
+
+	function setValue(row,col, value) {
+		// Abstract away the details in case we wish to compress all number storage or do something 
+		// based on specifics of cell type...
+
+		/*
+		var cell = getCell(row,col);
+		if (cell.type == X) {
+		}
+
+		if (typeof(value) == "number") {
+
+		}
+		*/
+		values[(row*cols)+col] = value;
+	}
+
+	function getValue(row,col) {
+		return values[(row*cols)+col];
+	}
+
+	
+	var CellTypes = {
+		VALUE:"value",
+		IMAGE:"image",
+		COMPOSITE:"composite"
+	};
+
+	var CellEdit = {
+		SUBMIT:"submit",
+		CANCEL:"cancel",
+		VALIDATE:"validate"
+	};
+
+
+	function Grid() {
+		// Singleton
+		return this;
+	}
+
+	function Cell(row,col) {
+		// Object constructor
+		var cell = Object();
+		cell.row = row;
+		cell.col = col;
+		
+		cell.type 	= CellTypes.VALUE;
+		cell.value 	= null;		// function(row,col)
+
+		cell.paint 	= null;		// function(ctx,x,y,width,height)	
+		cell.hover 	= null;		// function() [boolean]
+		cell.edit 	= null;		// function(null)
+		cell.mouse 	= null; 	// function(x,y,click[Boolean])
+		cell.key 	= null;		// function(key,down[Boolean])
+
+		// The overlay of the screen is displayed during some edit operations, but it should be optional
+		// for example depending on what key is pressed a cell might have multiple edit modes.
+
+		cell.overlay = null; 	// function() [Boolean]
+
+		// The editor could use either an interface where it is passed three booleans or an enum such as
+		// CellEdit above, which determine which behavior is being queried, or it could return a simple object 
+		// with functions for each of the desired behaviors.  Its probabbly less complicated and faster to do 
+		// it the former way, but its curenntly done the latter..
+
+		cell.editor = null;		// function(submit[Boolean],cancel[Boolean],validate[Boolean]), function(edit[CellEdit])
+		/*
+		{
+			submit: function  {},
+			cancel: function() {},
+			validate: function() {}
+		}
+		*/
+
+
+		cell.width 	= null;		// Int
+		cell.height = null;		// Int
+
+		cell.fill 	= null;		// function(text[Boolean]) String
+		cell.stroke = null;		// function(text[Boolean]) String
+		cell.font 	= null;		// function(text[Boolean]) String
+
+
+		return cell;
+	}
+
+
+	function cellTemplate(row,col) {
+		
+		if (col == 0)
+			return null;
+
+		// The goal is to use only one cell per column for specifying style and behavior, but sometimes we 
+		// will want to get access to more than one cell per column so we save the template but provide access
+		// to the underlying factory (this is used in the hover to display cell value).
+
+		// The generic template method is used during the paint and decreases object creation significantly, i.e.
+		// 1 object per col vs 10,000 objects per col, which improves performance...
+
+		var cell = getValue(0,col);
+		if (cell != null) {
+			
+			// If the cell has already been created just update with the current row/col
+			// so it can be used.
+			cell.row = row;
+			cell.col = col;
+
+		} else {
+			cell = cellFactory(row,col);
+			setValue(0,col,cell);
+		}		
+
+		return cell;
+	}
+
+
+	function cellFactory(row,col) {
+
+		// We could return a unique cell object for each row/col which can be kept as temporary
+		// during paint, or we can store it.  Keeping it as a temporary is actually not too bad
+		// performance wise provided we dont save references to it anywhere.
+
+		if (col == 0)
+			return null;
+
+		// Create a cell and customise it according to the column.
+		var cell = Cell(row,col);	
+
+		if (col == 1) {
+			
+			cell.value = function() {
+				return this.row;
+			}
+
+			cell.font = function() {
+				return 'italic 10pt verdana';
+			}
+
+			cell.fill = function(text) {
+				if (text) {
+					return "#993399";
+				}
+
+				return null;
+			}
+		} else if (col == 13 || col == 23) {
+
+			cell.width = 20;
+
+			cell.value = function () {
+				var val = getValue(this.row,this.col);
+				if (val == null) {
+					// Using a boolean and a float we can animate the state change using our custom paint
+					// routine.  This demonstrates the simplicity of having anything as a value...
+					val = Math.random()<0.5?false:true;
+					setValue(this.row,this.col,val);
+				} 
+				return val;
+			}	
+
+			cell.paint = function(ctx,x,y,width,height) {
+
+				var val = this.value();
+				var img=document.getElementById("glyphs");
+
+				// http://www.w3schools.com/tags/canvas_drawimage.asp
+				// The offset coordinates are taken from the css for bootstrap
+				
+				if (col == 23)
+					ctx.fillStyle = "#00FF00";
+				else
+					ctx.fillStyle = "#FF6666"
+
+				ctx.fillRect(x,y,width,height);
+
+				var offset = 0;
+				if (col == 23)
+					// icon-ok/icon-remove
+					offset = val?288:312;
+				else
+					// icon-star/icon-star-empty
+					offset = val?120:144;
+
+				ctx.drawImage(img,offset,0,14,14,x+3,y+2,14,14);
+			}
+
+			cell.edit = function() {
+				// Respond only to binary on/off key press
+				var val = this.value();		
+				setValue(this.row,this.col,!val);
+				cancelEdit();				
+			}
+
+			cell.hover = function() {
+				return null;
+			}
+
+			cell.overlay = function() {
+				return false;
+			}
+
+		} else if (col%10 == 0) {
+
+			cell.value = function () {
+				var val = getValue(this.row,this.col);
+				if (val == null) {
+					// Using a boolean and a float we can animate the state change using our custom paint
+					// routine.  This demonstrates the simplicity of having anything as a value...
+					val = [Math.random()<0.5?false:true,1.0];
+					setValue(this.row,this.col,val);
+				} 
+				return val;
+			}			
+
+			cell.paint = function(ctx,x,y,width,height) {
+		
+				ctx.strokeStyle = "white";
+				var val = this.value();
+				var radius = height/2;
+				var offset = (width-radius)*val[1];
+
+				// Since we dont clear the canvas, fill a clean background
+				ctx.fillStyle = "white";
+				ctx.fillRect(x,y,width,height);
+
+				var btnGradient = ctx.createLinearGradient(x, y, x, y+height);
+			    btnGradient.addColorStop(0, '#333333');	
+				btnGradient.addColorStop(1, '#666666');
+
+				var arcGradient = ctx.createLinearGradient(x, y, x, y+height);   
+				arcGradient.addColorStop(0, '#aaaaaa');
+				arcGradient.addColorStop(1, '#777777');	
+				    
+				if (val[0]) {					
+					ctx.fillStyle = btnGradient;
+					roundRect(ctx, x, y, width, height, radius, btnGradient); 
+
+					if (val[1] < 1.0)
+						ctx.fillStyle = arcGradient;
+					else
+						ctx.fillStyle = "#eeeeee";
+
+					ctx.beginPath();
+					ctx.arc(x+offset,y+radius,radius,0,2*Math.PI);
+					ctx.fill();
+
+				} else {
+					ctx.fillStyle = btnGradient;
+					roundRect(ctx, x, y, width, height, height/2, btnGradient); 
+
+					if (val[1] < 1.0)
+						ctx.fillStyle = "#eeeeee";
+					else
+						ctx.fillStyle = arcGradient;
+
+					ctx.beginPath();
+					ctx.arc(x+width-offset,y+radius,radius,0,2*Math.PI);
+					ctx.fill();
+
+				}
+
+				if (val[1] < 1.0)
+					val[1] += 0.25;
+			}
+
+			cell.edit = function() {
+				// Respond only to binary on/off key press
+				var val = this.value();
+				
+				// Animate state change ?? :)
+				val = [!val[0],0.0];
+				setValue(this.row,this.col,val);
+
+				cancelEdit();
+			}
+
+			cell.hover = function() {
+				return null;
+			}
+
+			cell.overlay = function() {
+				return false;
+			}			
+
+		} else if (col == 9) {
+
+			cell.value = function() {
+				var hex = this.row.toString(16).toUpperCase();
+				while (hex.length < 6) {
+	     		   hex = "0" + hex;
+	    		}
+	    		return "0x"+hex;	
+			}
+
+			cell.fill = function(text) {
+				if (text) return null;
+			
+				return "#FFDD00"
+			};
+
+		} else if (col%6 == 0){
+
+			cell.width = 100;
+
+			// Text cell with fixed data
+			cell.value = function () {
+				var val = getValue(this.row,this.col);
+				if (val == null) {
+					var profound = "Quidquid latine dictum sit, altum sonatur.";					
+					val = profound;
+					setValue(this.row,this.col,val);
+				} 
+				return val;
+			}	
+
+			cell.edit = function() {
+				$("#edit-text").show();	
+				$("#edit-confirm").show();
+				var val = this.value();
+				$("#edit-text-input").val(val);
+				$("#edit-text-input").focus();
+				$("#edit-text-input").select();
+			}
+
+			cell.editor = function() {
+				return {
+					submit:function() {
+						var val = $("#edit-text-input").val();
+						setValue(cell.row,cell.col,val);
+					},
+					cancel: null,
+					validate: null
+				}
+			}
+
+			cell.fill = function (text) {
+				if (text)
+					return "white";
+				// A color wheel, which we rotate through per col
+				var wheel = ['#66CCFF','#99CCFF','#00FF00','#CC0066','#009999','#FF9900','#6600FF','#669999','#FFFF00'];
+				var rgbArray = hexRgbArray(wheel[(this.col+Math.round(this.col/10)) % wheel.length]);
+
+				for (var i=0;i<rgbArray.length;++i)
+					rgbArray[i] = (rgbArray[i]+this.row)%255;
+
+				return rgb(rgbArray[0],rgbArray[1],rgbArray[2]);
+			}
+
+			cell.font = function () {
+				return 'italic 8px Times';
+			}
+		
+
+		} else if (col%4 == 0) {
+
+			// Text cell with random data
+			var ipsum = "Lorem ipsum dolor sit amet, malis repudiare mei in. Cu munere expetendis mea, affert aliquid definiebas at nam. Te scripta delectus singulis mel, et vidit error legere eum, ea latine feugait ponderum vix. Ius ei electram patrioque, et eum propriae deseruisse necessitatibus. Epicurei adipisci ex duo. Quidam iudicabit ullamcorper ex vel, per quot ipsum ad, libris quaeque iudicabit et usu. Ut postea nominavi cum, id eius porro mundi qui. Nec ex altera dolorum definiebas, consul viderer ex est. Et duo senserit salutandi, ad vim commodo epicurei. Ad pro iusto contentiones, nominavi eloquentiam cum ne. Nam elit nullam sensibus at, putent adipiscing delicatissimi sit ex. Ut nulla salutandi eam. Has ut amet verterem, te est altera utamur liberavisse. Sed in wisi accumsan pertinax, has et dolor libris possit, homero tamquam assueverit ex vix. Sea mucius fabellas patrioque ei, no utinam munere hendrerit ius. No usu officiis delicata complectitur, ex cum summo maiestatis, facer quidam nemore eu qui. Pri in eligendi dissentias scriptorem, posse volumus luptatum quo ut. Eu eligendi efficiantur vix, pro no enim rebum posse. Sit semper cotidieque et, eum alia liber praesent ea. Malorum delenit civibus cu mea.";
+
+
+			cell.value = function () {
+				var val = getValue(this.row,this.col);
+				var chance = Math.random();
+				if (val == null || chance <= 0.10) {
+					var index = (Math.random()*ipsum.length)-20;
+					val = ipsum.slice(index,index+20).toUpperCase();
+					setValue(this.row,this.col,val);
+				}
+
+				return val;
+			}
+			
+			cell.edit = function() {
+
+				$("#edit-select").show();
+				$("#edit-confirm").show();	
+				var val = this.value();
+				$("#edit-select-select").html("");
+				$("#edit-select-select").append('<option value="0">'+ val +'</option>');
+				for(var i=1;i<10;++i) {
+					var index = (Math.random()*ipsum.length)-20;
+					val = ipsum.slice(index,index+20).toUpperCase();
+					$("#edit-select-select").append('<option value="'+ i +'">'+ val +'</option>');
+				}
+
+				$("#edit-select-select").focus();
+			}
+
+			cell.editor = function() {
+				return {
+					submit:function() {
+						var val = $("#edit-select-select option:selected").text();
+						setValue(cell.row,cell.col,val);
+					},
+					cancel: null,
+					validate: null
+				}
+			}
+
+			cell.fill = function (text) {
+				if (text) return "#456600";
+
+				if (this.row%2 == 0) 
+					return "#00BBFF";
+				else
+					return "#6699FF";
+			}
+
+
+		} else if (col%2 == 0) {
+			// Editable cell with random value
+			cell.value = function () {
+				var val = getValue(this.row,this.col);
+				if (val == null) {
+					val = Math.random();
+					setValue(this.row,this.col,val);
+				}
+				return val;			
+			}
+
+			cell.edit = function() {
+
+				$("#edit-text").show();
+				$("#edit-confirm").show();
+				$("#edit-text-input").val(this.value().toString());				
+				$("#edit-text-input").focus();
+				$("#edit-text-input").select();
+			}
+
+			cell.editor = function() {
+				return {
+					submit:function() {
+						var val = $("#edit-text-input").val();
+						setValue(cell.row,cell.col,val);
+					},
+					cancel: null,
+					validate:function () {
+						var val = $("#edit-text-input").val();
+						return parseFloat(val);	
+					}
+				}
+			}
+
+			cell.font = function() {
+				return "italic 8pt Arial";
+			}
+
+			cell.fill = function(text) {
+				if (this.col%26 == 0) {
+					if (text) return "white";
+					return "#FF9933";
+				} else if (this.col%22 == 0) {
+					return (text)?"white":"#CC66FF";
+				} else if (this.col == 2) {
+					return (text)?"white":"#CC0066";
+				}
+
+				return null;
+			}
+
+	
+		} else {
+
+			cell.value = function () {
+				var val = getValue(this.row,this.col);
+				if (val == null) {
+					val = Math.random();
+
+					// Hijack the values for col 15
+					if (this.col == 15)
+						val = [val,performance.now()];
+
+					setValue(this.row,this.col,val);
+				} else {
+
+					var rand = Math.random();
+					if ((rand*10000) <= 100) {
+						var tick = Math.random()/100;
+
+						if (this.col == 15)
+							val = val[0];
+
+						if (Math.random() > 0.5)
+							val += tick							
+						else
+							val -= tick;
+
+						if (this.col == 15)
+							val = [val,performance.now()];
+
+						setValue(this.row,this.col,val);
+					}
+				}
+
+				return val;
+			}
+
+
+			cell.edit = function() {
+				$(editor).show();
+
+				if (this.col%3 != 0) {
+					// Just be sneaky and use the edit-text-input to increment and decrement
+					// the value, then the validation and submit works the same for all cols.
+					var val = parseFloat(getValue(cell.row,cell.col));
+					$("#edit-tick").show();
+					$("#edit-tick-up").click(function() {
+						setValue(cell.row,cell.col,++val);
+					});
+					$("#edit-tick-down").click(function(){
+						setValue(cell.row,cell.col,--val);
+					});			
+
+				} else {
+					$("#edit-text").show();				
+					$("#edit-text-input").val(this.value().toString());				
+					$("#edit-text-input").focus();
+					$("#edit-text-input").select();
+				}
+			}
+
+			cell.editor = function() {
+				return {
+					submit:function() {
+						if (this.col%3 != 0) return;
+						var val = $("#edit-text-input").val();
+						setValue(cell.row,cell.col,val);
+					},
+					cancel:function() {},
+					validate:function () {
+						if (this.col%3 != 0) return true;
+						var val = $("#edit-text-input").val();
+						return parseFloat(val);	
+					}
+				}
+			}
+
+			cell.fill = function (text) {
+
+				if (this.col == 15) {
+					if (text) return "#666666";
+
+					// Heatmap
+					var now = performance.now();
+					var val = getValue(this.row,this.col);
+					if (val) {
+
+						// The diff will be in seconds, but we want to scale to 255 rgb within about 15 seconds
+						// elapsed time.
+						var diff = ((now-val[1])/1000)*25;
+
+						var rgbArray = hexRgbArray("#330011");
+						rgbArray = [225-rgbArray[0],225-rgbArray[1],225-rgbArray[2]];
+
+						var css = rgb(Math.max(rgbArray[0]-diff,25),Math.max(rgbArray[1]-diff,25),Math.max(rgbArray[2]-diff,25));
+						return css;
+					}
+
+				}
+
+				if (text) return null;
+
+				return null;	
+			}
+		}
+
+		return cell;
+
+	}
+
+
+	function initHeaders() {
+
+		// Corner cell
+		setValue(0,0,null);
+
+		// Col headers
+		var row = 0;
+		for (var col=1;col<cols;++col) {
+			setValue(row,col,null);
+		}
+
+		// Row headers
+		var col = 0;
+		for (var row=0;row<rows;++row) {
+			setValue(row,col,null);
+		}
+
+	}
+
+	function initCells() {
+		for (var row=1;row<rows;++row) {
+			for(var col=1;col<cols;++col) {
+				setValue(row,col,null);
+			}
+		}
+	}
+	
+	
+	var wrapper = document.getElementById('wrapper');
+	var view = document.getElementById('view');
+
+	var render = document.getElementById('render');
+	var renderCtx = render.getContext('2d');
+	//renderCtx.scale(1, 1);
+	renderCtx.imageSmoothingEnabled = false;
+		
+	// Use pre-rendering, 40% faster
+	// http://jsperf.com/render-vs-prerender
+	var buffer = document.createElement('canvas');
+	var bufferCtx = buffer.getContext('2d');
+	//bufferCtx.scale(1,1);
+	bufferCtx.imageSmoothingEnabled = false;
+		
+			
+	
+	var editor = document.getElementById('editor');
+	// Cancel any clicking from the edit area
+	editor.onclick = function (e) {e.cancelBubble = true;}
+	editor.onkeydown = keyDown;
+	editor.onkeyup = keyUp;
+	
+	
+	var editX = 0;
+	var editY = 0;
+
+	var editWidth = editor.offsetWidth;
+	var editHeight = editor.offsetHeight;
+	
+	// When editing is active the edit box is shown, when edit has been initiated and we need to start
+	// the edit timer i.e. theres an enter key press on a selected cell, we use edit to initiate.
+	var editing = null;
+	var edit = false;
+
+	// We will do some updates 60 times a second
+	var fps = 30; 
+	
+	// resize the canvas to fill browser window dynamically
+	window.addEventListener('resize', resize, false);
+	
+	wrapper.addEventListener('click', click, false);
+	wrapper.addEventListener('mousemove', mouseMove, false);
+	wrapper.addEventListener('scroll',scroll,false);
+	wrapper.addEventListener("mousewheel", mouseWheel, false);
+
+	window.document.onkeydown = keyDown;
+	window.document.onkeyup = keyUp; 
+
+
+	// Wire up the edit related events, since the dom elements cant see the functions in scope here.
+	document.getElementById("edit-confirm-ok").onclick = submitEdit;
+	document.getElementById("edit-confirm-cancel").onclick = cancelEdit;
+
+
+	// http://www.cambiaresearch.com/articles/15/javascript-char-codes-key-codes
+	var keyCodes = {'esc':27,'enter':13,'shift':16,'ctrl':17,'alt':18,'up':38,'down':40,'left':37,'right':39,'tab':9,'delete':46};
+	var keys = {};
+
+	function addKey(key) {
+		if (!(key in keys)) {
+			keys[key] = true;
+		}
+	}
+
+	function delKey(key) {
+		delete keys[key];
+	}
+
+	function hasKey(key) {
+		return key in keys;
+	}
+
+	function keyDown(e) {	
+
+		if (editing) {
+
+			if (editing.key != null) {
+				// Pass the key event to the edit cell
+
+				// FIXME
+				// Use the correct return value here as it affects event bubbling...  the editing cell should
+				// return false if its handled a key and doesnt want events to continue to be processed !!
+				if (!editing.key(e,true))
+					return;
+			}
+
+
+			// Either of these can set the editing to null, either directly or via submitEdit() calling
+			// cancelEdit() once its done with validation.
+
+			if (editing && e.keyCode == keyCodes['esc']) {
+				// Cancel the edit, we dont allow the edit control to consume this event.
+				cancelEdit();
+			}
+
+			if (editing && e.keyCode == keyCodes['enter']) {
+				if (submitEdit()) {
+					e.cancelBubble = true;
+					e.preventDefault();	
+				}
+			}						
+
+			// Pass all events back to the browser so the edit cell has a chance to process
+			// them in the DOM.  But the edit cell should itself cancel all events after its
+			// done with them...  if we dont do this then we cant type anything into the dom
+			// form fields :)
+
+			return;
+
+		} else {
+
+			if (e.keyCode == keyCodes['enter']) {
+			
+				// This will trigger the edit from the paint event on a timer which will run intil
+				// cancelled.
+				edit = true;
+			}
+
+			if (e.keyCode == keyCodes['left']) {			
+				if (selectedCol > firstCol) {
+					--selectedCol;
+					var region = [selectedRow,selectedCol];
+					if (hasKey('shift')) {	
+						updateSelection(region);
+					} else {
+						clearSelection();
+						addSelection(region);
+					}
+					
+					selectedWidth = cellWidth(selectedRow,selectedCol);
+					selectedX -= selectedWidth+gridlineSize;
+				}
+
+				// Handle arrow key based scrolling.
+
+				// This is isnt perfect becuase we still stay on a particular cell twice sometimes, but we cant
+				// control how much the browser chooses to scroll and if the previous cell is still offscreen
+				// were stuck with it.
+				var prevSelectedWidth = cellWidth(selectedRow,selectedCol-1);
+				
+				if (selectedX-prevSelectedWidth-gridlineSize-10 < 0) {
+					console.log("selectedCol",selectedCol,"selectedX",selectedX,"selectedWidth",selectedWidth);
+					console.log("scroll!");
+					return;
+				}
+									
+				// Dont allow selectedX to go negative if the screen is too slow to scroll to update or we
+				// end up drawing the selection rect over the headers.  By returning above we allow the browser
+				// to process the key events which causes the scrolling...
+				
+				console.log("selectedCol",selectedCol,"selectedX",selectedX,"selectedWidth",selectedWidth);					
+					
+			}
+
+			if (e.keyCode == keyCodes['right']) {
+				if (selectedCol < lastCol) {
+				
+					selectedX += selectedWidth+gridlineSize;
+					++selectedCol;
+					
+					var region = [selectedRow,selectedCol];
+					if (hasKey('shift')) {
+						updateSelection(region);
+					} else {				
+						clearSelection();
+						addSelection(region);
+					}
+
+					// Try to use the event bubble to implement arrow scrolling once we reach the end of the
+					// screen.  Arrow keys by default scroll up/down left/right so all we have to do is let
+					// the events throug by returning early.
+					
+					// Update selectedX using the previous selectedWidth, then update selectedWidth and see
+					// if we went outside the window so we can update the scroll.
+					selectedWidth = cellWidth(selectedRow,selectedCol);						
+				}
+
+				if (selectedX+selectedWidth+gridlineSize+10 > wrapper.offsetWidth) {
+					console.log("selectedCol",selectedCol,"selectedX",selectedX,"selectedWidth",selectedWidth);		
+					return;
+				}					
+
+			}
+
+			if (e.keyCode == keyCodes['up']) {				
+				if (selectedRow > firstRow) {
+					--selectedRow;
+					var region = [selectedRow,selectedCol];
+					if (hasKey('shift')) {
+						updateSelection(region);
+					} else {
+						clearSelection();
+						addSelection(region);
+					}
+					
+					selectedHeight = cellHeight(selectedRow,selectedCol);
+					selectedY -= selectedHeight+gridlineSize;
+				}
+				
+				var prevSelectedHeight = cellHeight(selectedRow-1,selectedCol);
+				
+				if (selectedY-prevSelectedHeight-gridlineSize-10 < 0) {
+					console.log("selectedRow",selectedRow,"selectedY",selectedY,"selectedHeight",selectedHeight);		
+					return;
+				}
+			}
+
+			if (e.keyCode == keyCodes['down']) {
+				if (selectedRow < lastRow) {
+					
+					selectedY += selectedHeight+gridlineSize;
+					++selectedRow;
+					
+					var region = [selectedRow,selectedCol];
+					if (hasKey('shift')) {
+						updateSelection(region);
+					} else {				
+						clearSelection();
+						addSelection(region);
+					}
+					
+					selectedHeight = cellHeight(selectedRow,selectedCol);
+				}						
+				
+				if (selectedY+selectedHeight+gridlineSize+10 > wrapper.offsetHeight) {
+					console.log("selectedRow",selectedRow,"selectedY",selectedY,"selectedHeight",selectedHeight);		
+					return;
+				}
+				
+			}	
+
+	
+
+		}
+
+
+		// Track all key down events, this gives the edit cells more control...
+		for (var key in keyCodes) {
+			if (keyCodes[key] == e.keyCode)
+				addKey(key);
+		}
+
+		/*
+		if (e.keyCode == keyCodes['shift']) {
+			addKey('shift');
+		}
+
+		if (e.keyCode == keyCodes['ctrl']) {
+			addKey('ctrl');
+		}
+		*/			
+		
+		// Except we do want the browser to consume the arrow key events since that will allow 
+		// implementation of arrow key based scrolling.
+
+		// Dont let the browser consume any of these key events
+		e.cancelBubble = true;
+		e.preventDefault();		
+
+		//console.log("selection: " + selection);
+	}
+
+
+
+
+	function keyUp(e) {
+
+		if (editing) {
+
+			if (editing.key != null) {
+				// Pass the key event to the edit cell
+				editing.key(e,false);
+			}
+		}
+
+		// If the keyup was a key we care about, remove it from the list of 
+		// active key presses.
+		for (var key in keyCodes) {
+			if (keyCodes[key] == e.keyCode)
+				delKey(key);
+		}
+	}
+
+
+
+	var rowHeader = document.getElementById('row-header');
+	var colHeader = document.getElementById('col-header');
+	
+	var rowHeaderSize = 40;
+	var colHeaderSize = 40;
+
+	var scrollLeft = 0;
+	var scrollTop = 0;
+	
+	var clickX = -1;
+	var clickY = -1;
+	var clicked = false;
+
+	// Use current mouse X/Y to determine hover row/col during paint
+	var mouseX = -1;
+	var mouseY = -1;
+
+	var hoverRow = -1;
+	var hoverY = -1;
+	var hoverHeight = -1;
+
+	var hoverCol = -1;
+	var hoverX = -1;
+	var hoverWidth = -1;
+
+	// This is the window width/height at the moment but it might represent something else later... 
+	// we dont want to render outside the necessary area.  It gets updated on resize.
+	var viewWidth = 0;
+	var viewHeight = 0;
+
+	// The grid width/height is calculated according to the sum of all the row and col
+	// dimensions, and we keep it separate from the view for checking extends of scroll etc.
+	var gridWidth = 0;
+	var gridHeight = 0;
+
+	// When rendering, only paint those cells that can fit on screen so each paint 
+	// we record the first and last row/col.
+	var firstRow = -1;
+	var lastRow = -1;
+	var firstY = -1;
+	var lastY = -1;
+
+	var firstCol = -1;
+	var lastCol = -1;
+	var firstX = -1;
+	var lastX = -1;
+			
+	// The selection is a set of cell coordinates, either [row,col] or [r1,c1,r2,c2]     
+	// for an area.  It works like a stack too, so you can have multiple regions.
+	// The selected cell is always known, so we can extend a selection.
+	
+	// Default the first selected row/col to 1,1 so it can be seen
+	var selectedRow = 1;
+	var selectedCol = 1;
+	var selectedX = -1;
+	var selectedY = -1;
+	var selectedWidth = -1;
+	var selectedHeight = -1;
+
+	
+	var selection = [];
+
+	function addSelection(region) {
+		if (!hasSelection(region))
+			selection.push(region);
+
+		//console.log("selection: " + selection);
+	}
+
+	function delSelection(region) {
+		region = normSelection(region);
+		for(var i=0;i<selection.length;++i) {
+			var sel = normSelection(selection[i]);
+			if (sel == region)
+				delete selection[i];
+		}
+	}
+
+	function isSelected(row,col) {
+		for(var i=0;i<selection.length;++i) {			
+			var sel = normSelection(selection[i]);	
+			if (sel.length == 4) {
+
+				var r1 = sel[0], r2 = sel[2], c1 = sel[1], c2 = sel[3];
+				if (row >= r1 && row <= r2 && col >= c1 && col <= c2)
+					return true;
+			} else {
+				if (sel[0] == row && sel[1] == col)
+					return true;
+			}
+		}
+
+		return false;
+	}	
+
+
+	function normSelection(region) {
+		// Normalise a region so that it is in [top,left], [bottom,right]
+		// format so we can compare it and test for inclusion.
+		if (region.length == 4) {
+			// Allow pre-branch prediction here by setting one alternative
+			// and changing it if its wrong.
+			var r1 = region[0], r2 = region[2];
+			if (r1 > r2) {
+				r1 = region[2];
+				r2 = region[0];
+			}
+
+			var c1 = region[1], c2 = region[3];				
+			if (c1 > c2) {
+				c1 = region[3];
+				c2 = region[1];
+			}
+
+			return [r1,c1,r2,c2];
+		}
+
+		return region;
+	}
+
+	function hasSelection(region) {
+		region = normSelection(region);
+		for(var i=0;i<selection.length;++i) {
+			var sel = normSelection(selection[i]);
+			if (sel == region)
+				return true;
+		}
+		return false;
+	}
+
+	function updateSelection(region) {
+		
+		if (selection.length == 0) {
+			addSelection(region);
+			return;
+		}
+
+		var index = selection.length-1;
+
+		var sel = selection[index];
+
+		var row = region[0];
+		var col = region[1];
+
+		if (sel.length == 4) {
+			sel[2] = row, sel[3] = col;
+		} else {
+			var region = [sel[0],sel[1],row,col];
+			//sel[0] = row, sel[1] = col;
+			selection[index] = region;
+		}
+	}
+
+	function clearSelection() {
+		selection = [];
+	}
+
+	
+	
+	function roundRect(ctx, x, y, width, height, radius, fill, stroke) {
+		if (typeof(stroke) == "undefined" )
+			stroke = true;
+	
+		if (typeof(radius) === "undefined")
+			radius = 5;
+		
+		ctx.beginPath();
+		ctx.moveTo(x + radius, y);
+		ctx.lineTo(x + width - radius, y);
+		ctx.quadraticCurveTo(x + width, y, x + width, y + radius);
+		ctx.lineTo(x + width, y + height - radius);
+		ctx.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
+		ctx.lineTo(x + radius, y + height);
+		ctx.quadraticCurveTo(x, y + height, x, y + height - radius);
+		ctx.lineTo(x, y + radius);
+		ctx.quadraticCurveTo(x, y, x + radius, y);
+		ctx.closePath();
+		if (stroke)
+			ctx.stroke();
+	
+		if (fill)
+			ctx.fill();     
+	}
+
+	function hexRgbArray(hex) {
+		var rgb = [parseInt(hex.substring(1,3),16),parseInt(hex.substring(3,5),16),parseInt(hex.substring(5,7),16)];
+		return rgb;
+	}
+
+	function hexRgb(hex) {
+		var rgb = 'rgb('+parseInt(hex.substring(1,3),16)+','+parseInt(hex.substring(3,5),16)+','+parseInt(hex.substring(5,7),16)+','+alpha+')';
+		return rgb;
+	}
+
+	function hexRgba(hex,alpha) {
+		var rgba = 'rgba('+parseInt(hex.substring(1,3),16)+','+parseInt(hex.substring(3,5),16)+','+parseInt(hex.substring(5,7),16)+','+alpha+')';
+		return rgba;
+	}
+
+	function rgb(r,g,b) {
+		return 'rgb('+Math.round(r)+','+Math.round(g)+','+Math.round(b)+')';
+	}
+	
+	function rgba(r,g,b,alpha) {
+		return 'rgba('+Math.round(r)+','+Math.round(g)+','+Math.round(b)+','+alpha+')';
+	}
+	
+	function zoom() {
+		//
+	}
+	
+	function mouseWheel(e) {
+
+		var delta = 0;
+		if (e.wheelDelta) { 
+				delta = e.wheelDelta/120;
+		} 
+
+		//console.log("wheel: " + delta);       
+		
+		// Stop sheer during mouse wheel page like scrolling by forcing a render.
+		if (Math.abs(delta) > 10)
+			doRender();
+
+		if (wrapper == window || wrapper == window.document) {
+
+			// FIXME
+			// This was a bit agressive and stopping the last part of the scroll event on a mac trackpad so
+			// it is now only allowed if the canvas is at zero. And it might not be needed with a div wrapper
+			// doing the scrolling.
+
+			// If we try to wheel past the beginning of the screen, try to stop the sheer thats seen in osx
+			if (scrollLeft+e.deltaX < 0 || scrollTop+e.deltaY < 0) {
+	        	e.returnValue = false;
+				e.preventDefault();
+			}
+		}
+
+
+		return true;
+	}
+
+	function submitEdit(val) {
+		if (editing) {
+			var handler = null;
+			if (editing.editor != null)
+				handler = editing.editor();
+
+			if (handler != null) {
+				if (handler.validate != null && !handler.validate())
+					return false;
+
+				if (handler.submit != null)
+					handler.submit();
+
+				cancelEdit();
+			} else {
+				var val = editing.value();
+				setValue(editing.row,editing.col,val);
+				cancelEdit(); 
+			}
+		}
+
+		return true;
+	}
+	
+	function cancelEdit() {
+
+		$(editor).css('z-index',-1);	
+		editor.style.visibility = 'hidden';
+		//$(editor).hide();
+
+		$("#edit-text").hide();
+		$("#edit-nav").hide();
+		$("#edit-select").hide();
+		$("#edit-tick").hide();
+		$("#edit-confirm").hide();
+
+		editing = null;
+		edit = false;
+
+		clickX = -1;
+		clickY = -1; 
+	}
+
+
+	
+	function mouseMove(event) {
+
+		
+		
+		mouseX = event.clientX;
+		mouseY = event.clientY;
+
+
+		if (!boundsTest(mouseX,mouseY,wrapper.offsetLeft,wrapper.offsetTop,wrapper.offsetWidth,wrapper.offsetHeight))
+			return;
+
+		// Offset the mouse coordinates to the grid
+		mouseX -= wrapper.offsetLeft;
+		mouseY -= wrapper.offsetTop;
+
+		//console.log("mouse: ("+ mouseX +","+ mouseY +")");
+
+		var x = firstX;
+		var y = firstY;
+
+		//console.log("cartesian: ("+ x +","+ y +")");
+
+		// Need to make sure hover isnt active if the row/col is completely
+		// obscured by a header.
+
+		hoverRow = hoverY = hoverHeight = -1;
+		hoverCol = hoverX = hoverWidth = -1;
+
+		var height, width;
+
+		for (var row=firstRow;row<lastRow;++row) {	
+			height = rowHeight(row);
+			
+			if (mouseY > colHeaderSize && mouseY >= y && mouseY < y+height) {
+				for (var col=firstCol;col<lastCol;++col) {
+					width = colWidth(col);
+
+					if (mouseX > rowHeaderSize && mouseX >= x && mouseX < x+width) {
+						
+						// Track where the mouse is currently hovering so we can draw hover bars
+						// and optional cell preview.
+
+						hoverRow = row;
+						hoverY = y;
+						hoverHeight = height;
+
+						hoverCol = col;
+						hoverX = x;
+						hoverWidth = width;
+
+						//console.log("hover: ("+ hoverRow +","+ hoverCol +")");
+
+						return;
+					}
+
+					x += width+gridlineSize;
+				}
+				break;
+			}
+
+			y += height+gridlineSize;	
+		}
+	}
+
+
+	function scrollSelected() {
+
+		if(document.createEvent) {
+	        var eventObj = document.createEvent("Events");
+	        eventObj.initEvent("scroll", true, true);
+	        window.dispatchEvent(eventObj);
+	    }
+	}
+
+	//$(window).scroll(function(){
+	function scroll(e) {
+
+		// Row and column headers and scrolling.
+
+	    //console.log(window.scrollX,window.scrollY,gridWidth,gridHeight);
+	    
+	    // FIXME
+	    // This should really be using viewWidth/viewHeight but im experimenting with overdraw to try
+	    // and get the scroll to be smoother at the moment.  Scrolling should not exceed the extents
+	    // of the grid minus the window/view width/height.
+
+	    var maxScrollWidth = gridWidth-wrapper.offsetWidth;
+	    if (wrapper.scrollLeft < maxScrollWidth)
+			scrollLeft = wrapper.scrollLeft;
+		else
+			scrollLeft = maxScrollWidth;
+		//	e.preventDefault();
+
+		var maxScrollHeight = gridHeight-wrapper.offsetHeight;
+		if (wrapper.scrollTop < maxScrollHeight)
+	    	scrollTop = wrapper.scrollTop;
+		else
+			scrollTop = maxScrollHeight;
+		//	e.preventDefault();	
+
+
+	    render.style.left = scrollLeft+"px";
+		render.style.top = scrollTop+"px";
+
+
+	    if (scrollLeft > 0 && scrollTop > 0) {
+
+			doRender();
+	    }
+	}
+	//});
+
+
+	function click(event) {
+		
+		// Cancel edit before we set the click event since it sets the clickX/Y to -1
+		cancelEdit();
+	
+		//window.alert("click: " +event.x+","+event.y);
+		clickX = event.x-wrapper.offsetLeft;
+		clickY = event.y-wrapper.offsetTop;
+		clicked = true;
+
+		console.log("click: "+ clickX +","+ clickY);		   
+	}
+	
+	function resize() {
+
+		// The render sits within the view, but at the moment its a bit inconsistent because im trying to
+		// work out if having either a render bigger than the view, or buffer, or some combination off helps
+		// to reduce scrolling shear... ideally though the code would reference one set of variables for the
+		// window innner width/height that was abstracted from the window object so that the grid could be
+		// used more like a control, not just against a full window.
+
+		viewWidth = $(wrapper).width()+200;
+		viewHeight = $(wrapper).height()+200;
+
+		render.width = viewWidth;
+		//render.width = 768;
+		render.height = viewHeight;
+
+		// 1920x1080
+		//render.width = 1920;
+		//render.height = 1080;
+
+		// 720p
+		//render.width = 1280;
+		//render.height = 720;
+		
+
+		buffer.width = render.width;
+		buffer.height = render.height;
+
+		
+		cancelEdit();
+		doRender();
+
+		console.log("first: ("+ firstRow +","+ firstCol +")");
+		console.log("last: ("+ lastRow +","+ lastCol +")");
+	}
+	
+
+	function rowHeight(row) {	
+		if (row == 0)
+			return colHeaderSize;
+
+		var cell = getValue(row,0);
+		if (cell != null && cell.height != null) {
+			return cell.height;
+		}
+		
+		// Default height
+		return 15;
+		//return 15*scale;
+	}
+
+	function colWidth(col) {
+		if (col == 0)
+			return rowHeaderSize;
+
+		// Get the raw cell without any factory modifications because we 
+		// just want the basic info.
+		var cell = getValue(0,col);
+		if (cell != null && cell.width != null) {
+			return cell.width;
+		}
+
+		 // Default width
+		return 50;		
+		//return 50*scale;
+	}
+	
+	function cellWidth(row,col) {
+		return colWidth(col);
+	}
+	
+	function cellHeight(row,col) {
+		return rowHeight(row);
+	}
+	
+
+	function colCode(col) {
+		// Name the column headers in A, .., AA, AB, AC, .., AZ format
+		// quotient/remainder
+		//var quo = Math.floor(col/27);
+		var quo = Math.floor((col-1)/26);
+		var rem = (col-1)%26;
+
+		var code = "";
+		if (quo > 0)
+			code += String.fromCharCode("A".charCodeAt(0)+quo-1);
+		code += String.fromCharCode("A".charCodeAt(0)+rem);		
+		return code;
+	}
+
+	
+	function colWidths() {
+		var width = 0;
+		for (var col=0;col<cols;++col) {
+			width += colWidth(col)+gridlineSize;
+		}
+		return width;
+	}	
+	
+	function rowHeights() {		
+		var height = 0;
+		for (var row=0;row<rows;++row) {
+			height += rowHeight(row)+gridlineSize;
+		}
+		return height;
+	}
+	
+	function boundsTest(hitX,hitY,x,y,width,height) {
+		if (hitX > -1 && hitY > -1) {
+			if (hitX >= x && hitX < x+width && hitY >= y && hitY < y+height) {
+				return true;
+			}
+		}
+	
+		return false;
+	}
+	
+	function hitTest(x,y,width,height) {
+		if (clickX > -1 && clickY > -1) {
+			if (clickX >= x && clickX < x+width && clickY >= y && clickY < y+height) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+	
+	
+	function doRender() {	 
+		// We paint on resize, or on timer
+		paint();	
+		draw();
+	} 
+	
+	
+	function paint() {
+	
+		var ctx = bufferCtx;
+
+		// No need to clear as we redraw everything anyway...
+		//ctx.clearRect(0,0,viewWidth,viewHeight);
+
+		/*
+		var headers = true;			  
+		var cells = true;		 
+		var gridlines = true;
+		var selected = true;
+		var select = true;
+		var hover = true;
+		*/
+
+		
+		var offsetX = 0;
+		var offsetY = 0;
+
+		
+		//if (headers) {
+
+			if (colHeaderSize > 0)
+				offsetY += colHeaderSize+gridlineSize;
+				
+			if (rowHeaderSize > 0) 
+				offsetX += rowHeaderSize+gridlineSize;
+		//}
+
+
+		//if (cells) {
+			paintCells(ctx,offsetX,offsetY);
+		//}
+		
+		// Each cell should be represented as a mid point on the cell location to support zooming and overlay of html5 
+		// controls/widgets which can be made even more functional than a conventional grid.	Usually win32 is limited
+		// because controls arent easy to re-parent and overlay, in html5 we can do anything we want including zooming 
+		// in and out and scrolling the background in real time and its easy :)
+		
+		//if (gridlines) {
+			paintGridlines(ctx,offsetX,offsetY);
+		//}
+
+		// if (selected) {
+			if (selectedX > 0 && selectedY > 0) {
+				
+				// Selected cell rect, something close to XOR.  Should be drawn underneath the headers
+				// so that the headers cover any overlap.
+
+				// http://tutorials.jenkov.com/html5-canvas/composition.html
+				ctx.save();
+				ctx.globalCompositeOperation = "source-atop";
+				// Same color as hover, but less alpha
+				ctx.strokeStyle = hexRgba("#DDDDFF",0.7);
+				//ctx.strokeStyle = hexRgba("#333333",0.7);
+				ctx.lineWidth = 4;
+				ctx.strokeRect(selectedX-1,selectedY-1,selectedWidth+2,selectedHeight+2);
+				ctx.restore();				
+			}
+		//}
+
+		//if (headers) {
+			// 0 means no header
+			paintHeaders(ctx,0,0);
+		//}
+		
+		//if (hover) {
+
+			paintHover(ctx,0,0);
+
+		//}	
+	}
+
+	function paintHover(ctx,offsetX,offsetY) {
+
+		ctx.fillStyle = hexRgba("#DDDDFF",0.5);
+
+		// Row
+		ctx.fillRect(0,hoverY,hoverX,hoverHeight);
+		ctx.fillRect(hoverX+hoverWidth,hoverY,viewWidth-hoverX-hoverWidth,hoverHeight);
+
+		// Col
+		ctx.fillRect(hoverX,0,hoverWidth,hoverY);
+		ctx.fillRect(hoverX,hoverY+hoverHeight,hoverWidth,viewHeight-hoverY-hoverHeight);
+
+
+		if (hoverRow > 0 && hoverCol > 0) {
+
+			// Active cell highlight
+
+			var width = hoverWidth;
+			var height = hoverHeight;
+			var x = hoverX;
+			var y = hoverY;
+
+			var val = null;
+
+			var cell = cellFactory(hoverRow,hoverCol);
+
+			// Hover preview of cell value, but only allow if hover isnt disabled and it has a defined
+			// preview value.
+
+			var hover = true;
+			if (cell.hover)
+				hover = cell.hover();
+
+
+			if (hover != null) {
+
+				ctx.fillStyle = 'white';
+				ctx.fillRect(x,y,width,height);
+
+				if (cell.value) {
+
+					val = cell.value();
+					ctx.font = 'bold 12px Arial';
+					var measure = ctx.measureText(val.toString()).width;
+					if (measure > width) {
+						var offset = (measure-width)/2;  
+						x -= offset;
+						width += offset*2;			
+					}
+				} 
+
+				x -= 4;
+				y -= 4;
+				width += 8;
+				height += 8;
+
+				ctx.fillStyle = '#666666';
+				ctx.strokeStyle = "white";
+				ctx.lineWidth = 1;
+				roundRect(ctx, x, y, width, height, 5, true, true);
+
+				// Currently the cell factory is a singleton and only returns a single cell per column so we cant
+				// use it while edit is active or it will be invalid.
+				if (val) {
+					ctx.font = 'bold 12px Arial';
+					ctx.fillStyle = 'white';				
+					ctx.fillText(val.toString(), x+2, y+(height/2)+5);
+				}
+			}
+		}
+	}
+  
+	function paintHeaders(ctx,offsetX,offsetY) {
+
+		var width = 0;
+		var height = 0;
+
+		//console.log("scroll: ("+ scrollLeft +","+ scrollRight +")");
+
+		var x = offsetX;
+		var y = offsetY;
+
+		var colGradient = ctx.createLinearGradient(x, y, x, colHeaderSize);
+	    colGradient.addColorStop(0, '#666666');   
+	    colGradient.addColorStop(1, '#333333');
+
+
+		var rowGradient = ctx.createLinearGradient(x, y, rowHeaderSize, y);
+	   	rowGradient.addColorStop(0, '#666666');   
+	    rowGradient.addColorStop(1, '#333333');
+
+	    //console.log("cartesian: ("+ x +","+ y +"), ("+ width +","+ height +")"); 
+
+	    var txtGradient = ctx.createLinearGradient(x, y, x, colHeaderSize);
+	    txtGradient.addColorStop(0, '#999999');
+	    txtGradient.addColorStop(1, '#333333');
+		
+		if (rowHeaderSize) {
+		
+			height = cellHeight(row,0);
+
+			// Row headers
+
+			x = offsetX;
+			y = offsetY+colHeaderSize+gridlineSize;
+		
+			ctx.fillStyle = rowGradient;
+			ctx.fillRect(x,y,rowHeaderSize,viewHeight);
+		
+			ctx.beginPath();
+			ctx.strokeStyle = '#999999';
+			ctx.lineWidth = gridlineSize;
+
+			ctx.moveTo(x+rowHeaderSize,y);
+			ctx.lineTo(x+rowHeaderSize,y+viewHeight);
+		
+			y = firstY;
+			for (var row=firstRow;row<lastRow;++row) {
+
+				ctx.moveTo(x, y);
+				ctx.lineTo(x+rowHeaderSize, y);
+
+				y += height+gridlineSize;
+			}
+
+			ctx.stroke();		
+
+			// Row header labels
+			ctx.font = 'bold 10px Arial';
+			y = firstY;
+			for (var row=firstRow;row<lastRow;++row) {
+				
+				var id = (row).toString();
+
+				// Drop shaddow text
+				ctx.fillStyle = "#333333";
+				ctx.fillText(id, x+6+1, y+(height/2)+4+1);			
+				ctx.fillStyle = "#888888";
+				ctx.fillText(id, x+6, y+(height/2)+4);					
+
+				y += height+gridlineSize;
+			}		
+
+		}
+
+		if (colHeaderSize) {
+			
+			// Column headers
+
+			x = offsetX+rowHeaderSize+gridlineSize;
+			y = offsetY;	
+			
+			ctx.fillStyle = colGradient;
+			ctx.fillRect(x,y,viewWidth,colHeaderSize);
+
+			ctx.beginPath();
+			ctx.strokeStyle = '#999999';			
+			ctx.lineWidth = gridlineSize;
+
+			ctx.moveTo(x,y+colHeaderSize);
+			ctx.lineTo(x+viewWidth,y+colHeaderSize);			
+
+			x = firstX;
+			for (var col=firstCol;col<lastCol;++col) {
+
+				width = cellWidth(0,col);
+				
+				ctx.moveTo(x, y);
+				ctx.lineTo(x, y+colHeaderSize);		
+
+				x += width+gridlineSize;
+			}
+
+			ctx.stroke();
+
+
+			// Column header labels
+			
+			ctx.font = 'bold 12px Arial';
+			x = firstX;
+			for (var col=firstCol;col<lastCol;++col) {
+				width = cellWidth(0,col);
+			
+				var id = colCode(col);
+
+				// Drop shaddow text
+				ctx.fillStyle = "#333333";
+				ctx.fillText(id, x+6+1, y+(colHeaderSize/2)+5+2);			
+				ctx.fillStyle = txtGradient;
+				ctx.fillText(id, x+6, y+(colHeaderSize/2)+5);			
+
+
+				x += width+gridlineSize;
+			}
+			
+		}
+		
+		if (rowHeaderSize || colHeaderSize) {	
+
+			// Corner
+			x = offsetX;
+			y = offsetY;
+
+			ctx.fillStyle = colGradient;
+			ctx.fillRect(x,y,rowHeaderSize,colHeaderSize);
+			
+			ctx.strokeStyle = '#666666';
+			ctx.lineWidth = gridlineSize;
+      		/*
+			ctx.beginPath();
+			ctx.moveTo(x+rowHeaderSize+gridlineSize,y);
+			ctx.lineTo(x+rowHeaderSize+gridlineSize,y+colHeaderSize);
+			ctx.moveTo(x,y+colHeaderSize+gridlineSize);
+			ctx.lineTo(x+rowHeaderSize,y+colHeaderSize+gridlineSize);
+			ctx.stroke();
+			*/
+
+			ctx.strokeRect(x,y,rowHeaderSize+1,colHeaderSize+1);
+		}
+
+
+	}
+  
+	function paintCells(ctx, offsetX, offsetY) {
+
+		//console.log("scroll: ("+ scrollLeft +","+ scrollTop +")");
+		
+		// Draw any hit related content, like edit boxes after the cells so it sits on top.
+		var hitX, hitY, hitWidth, hitHeight;
+		var hit = false;
+		
+		firstRow = -1;
+		lastRow = -1;
+
+		firstCol = -1;
+		lastCol = -1;
+		
+		// Flipped around so we render in terms of columns, which should allow some caching of 
+		// the cell template and default fonts etc....
+		
+		var x = offsetX-scrollLeft;
+		for (var col=1;col<cols;++col) {
+					 
+			var width = colWidth(col);
+			if (x+width >= 0) {
+
+				if (firstCol == -1) {							
+					firstCol = col;	
+					firstX = x;
+				}
+
+				var y = offsetY-scrollTop;
+				for (var row=1;row<rows;++row) {
+					
+					var height = rowHeight(row);
+					if (y+height >= 0) {
+
+						if (firstRow == -1) {
+							firstRow = row;
+							firstY = y;
+						}
+
+
+						// Test for mouse click in cell
+						if (clicked && 	hitTest(x,y,width,height)) {
+							
+							//console.log("hit: ("+ x +","+ y +"), ("+ width +","+ height +")");				
+							hit = true;
+							hitX = x, hitY = y, hitWidth = width, hitHeight = height;
+						
+								
+							if (clicked) {
+								// Update selection, and clear all others since this was a click
+								selectedRow = row;							
+								selectedCol = col;
+
+								var region = [selectedRow,selectedCol];
+								if (hasKey('shift')) {
+									updateSelection(region);
+								} else {
+									clearSelection();
+									addSelection(region);
+								}
+
+								// Consume the click event so that no other hittest can succeed during paint
+								clicked = false;
+
+							}
+							
+						}
+									
+						// Selection is cleared and reset on mouse click, but also when the arrow keys
+						// are used, so we need to check for the selected state here.  In addition to 
+						// the current slected cell, there is also a stack of previously selected cells
+						// defined by regions.
+
+						var selected = false;
+						if (selectedRow == row && selectedCol == col) {
+							
+							selected = true;
+							// Update selected coordinates
+
+							// Primarly the current selected cell coordinates are used for starting the 
+							// edit callout...
+							selectedX = x, selectedY = y, selectedHeight = height, selectedWidth = width;						
+						}
+
+						var cell = cellTemplate(row,col);
+
+
+						if (cell.paint == null) {		
+													
+							var fill = null;	
+							if (cell.fill != null)
+								fill = cell.fill();
+								
+							if (fill != null) {
+								ctx.fillStyle = fill;
+							} else {
+								// Alternate default column colors
+								if (col%2 == 0)
+									ctx.fillStyle = 'rgb(230,230,230)';
+								else
+									ctx.fillStyle = 'rgb(255,255,255)';
+							}
+
+							ctx.fillRect(x,y,width,height);
+						} else {
+
+							// Custom cell painting
+
+							cell.paint(ctx,x,y,width,height);
+						
+						}
+
+						// We can either pass the selection painting function into the custom paint routine
+						// or have some other way of delaying text writing so that we draw text ontop of 
+						// selection, or just ignore it and always draw selection last.
+
+						// And overlay selection...
+						if (selected || isSelected(row,col)) {
+
+							var hover = true;
+							if (selected && cell.hover) {
+								hover = cell.hover();
+
+								// If this selection was caused by a click, then fire the edit event if the hover is 
+								// disabled (which at the moment indicates its a binary state change and can run with
+								// either enter or a click).
+								if (hit && !hover)
+									edit = true;
+							}
+
+							if (!selected || hover) {
+								// If its part of the selection but not the selected cell, or if it is the selected cell
+								// and hover is allowed, then draw the selection overlay (as opposed to the fulls screen
+								// edit overlay) over this individual cell.
+
+								if (selected)
+									ctx.fillStyle = hexRgba("#FFFFFF",0.5);
+								else
+									ctx.fillStyle = hexRgba("#666666",0.5);
+							
+								ctx.fillRect(x,y,width,height);
+							}
+
+						}
+
+
+						// No custom paint and its a value type cell
+						if (cell.paint == null && cell.type == CellTypes.VALUE) {
+							var val = cell.value();
+
+							// Text
+							var fill = null;
+							if (cell.fill != null)
+								fill = cell.fill(true);
+
+							if (fill)
+								ctx.fillStyle = fill;
+							else
+								ctx.fillStyle = 'rgb(123,123,123)';
+
+							var font = null;
+							if (cell.font != null)
+								font = cell.font();
+
+							if (font)
+								ctx.font = font;
+							else {
+
+								var defaultFont = 'bold 10px Arial';	
+								if (ctx.font != defaultFont)
+									ctx.font = defaultFont;
+								
+							}
+		
+							
+							if (typeof(val) == "number")
+								ctx.fillText(val.toString().substring(0,8), x+2, y+(height/2)+5);
+							else {
+								// This will overflow but always be cleaned up by the gridlines and overwritten
+								// by the next cell, lazy but otherwise requires custom paint or reverse measure
+								// operation...
+								ctx.fillText(val, x+2, y+(height/2)+5);
+							}
+								
+						}
+
+					}
+
+					if (y+height >= viewHeight) {
+						if (lastRow == -1) {
+							lastRow = row;
+							lastY = y;
+						}	
+
+						break;
+					}
+				
+					y += height+gridlineSize;
+
+				}		
+			}
+
+
+			if (x+width >= viewWidth) {
+				if (lastCol == -1) {
+					lastCol = col;
+					lastX = x;
+				}
+
+				break;
+			}
+
+			x += width+gridlineSize;	
+
+		}	   
+		
+
+		if (edit || editing) {
+			// We need to paint the edit callout while we are editing, but only start the dom overlay once
+			// so we transition from the edit to editing state.
+
+			//console.log("selected: ("+selectedX+","+selectedY+") ("+selectedWidth+","+selectedHeight+")");
+
+			// Edit 			
+			edit = false;	
+			var cell = cellFactory(selectedRow,selectedCol);
+
+			if (cell.edit != null) {
+
+				// If the cell has editing enabled, then swith the state and begin the edit process whilst 
+				// continuing to draw the edit overlay.
+
+				paintEdit(ctx,selectedX,selectedY,selectedWidth,selectedHeight,cell);	
+			}
+		}
+		
+	}
+
+  
+	function paintGridlines(ctx, offsetX, offsetY) {
+		
+		ctx.beginPath();
+		ctx.strokeStyle = '#666666';
+		ctx.lineWidth = gridlineSize;
+
+
+		var x = firstX;
+		var y = firstY;
+
+		for (var col=firstCol;col<=lastCol;++col) {				 
+			var width = colWidth(col);
+
+			ctx.moveTo(x, y);
+			ctx.lineTo(x, y+viewHeight);	
+
+			x += width+gridlineSize;
+		}
+
+		x = firstX;
+		y = firstY;
+		for (var row=firstRow;row<=lastRow;++row) {
+			var height = rowHeight(row);
+
+			ctx.moveTo(x, y);
+			ctx.lineTo(x+viewWidth, y);
+
+			y += height+gridlineSize;
+		}
+		
+		ctx.stroke();		
+	}
+  
+	function paintEdit(ctx,x,y,width,height,cell) {
+
+		
+		//console.log("cartesian: ("+ x +","+ y +"), ("+ width +","+ height +")"); 
+		//console.log("canvas: ("+ canvas.style.left +","+ canvas.style.top +"), ("+ canvas.width +","+ canvas.height +")");
+		//console.log("edit: ("+ editX +","+ editY +"), ("+ editWidth +","+ editHeight +")");
+		
+		// Start editing, make local copies of the values so that they reflect the current state
+		// as the lambda will take the delayed state (i.e. final value of x,y...)
+		
+		// We can calculate the size of the edit required based on some cell type information, then based
+		// on that render a zoom out overlay on the canvas before handing off to the div overlay for controls
+		// and more basic javascript functionallity.
+		
+
+		// Like a crash zoom on an SLR camera, we expand out from the cell to create a zoom effect so we can 
+		// create edit controls of a more usable size :)
+		var editDistance = 25;
+		
+		// Offset for rounded corners
+		var editOffset = 5;
+		
+		var flipLeft = false;
+		var flipRight = false;
+		var flipVertical = false;
+		
+
+		editX = x+editDistance;
+		editY = y+height+editDistance;
+		
+		// The edit box will be centred or snapped to an edge of the cell and aligned
+		if (editX+editWidth > render.width) {
+			flipRight = true;			 		
+			editX = (x+width) - editDistance-editWidth;
+		}
+		
+		if (editX < 0) {
+			flipLeft = true;
+			editX = x;
+		}
+		
+		if (editY+editHeight > render.height) {
+			flipVertical = true;
+			editY = y-editHeight-editDistance;			 
+		}
+		
+		//console.log("edit: ("+ editX +","+ editY +"), ("+ editWidth +","+ editHeight +")");
+		
+		// Overlay is opt out, so we show it unless explicitly disabled..
+		var overlay = true;
+		if (cell.overlay)
+			overlay = cell.overlay();
+
+
+		if (overlay) {
+
+			ctx.fillStyle = hexRgba('#666666',0.50);
+
+			ctx.beginPath();
+
+			// Clockwise to paint positive space
+			ctx.moveTo(0,0);
+			ctx.lineTo(viewWidth,0);
+			ctx.lineTo(viewWidth,viewHeight);
+			ctx.lineTo(0,viewHeight);
+			ctx.lineTo(0,0);
+
+			// Anticlockwise to pain negative space
+			ctx.moveTo(x+width,y+height);
+			ctx.lineTo(x+width,y);
+			ctx.lineTo(x,y);
+			ctx.lineTo(x,y+height);
+			ctx.lineTo(x+width,y+height);
+
+			ctx.fill();
+		}
+
+
+		if (!editing) {
+
+			// While editing we always paint the overlay above, but only issue a single call to start
+			// the edit process using DOM elements.
+			editing = cell;
+			setTimeout(function(){doEdit(editX,editY,editWidth,editHeight,editDistance)},10);
+		}		
+		
+	}
+
+	function doEdit(x,y,width,height,distance) {
+	  	
+		$(editor).css('left',x);
+		$(editor).css('top',y);
+		
+		editor.style.zIndex = 1000;
+		editor.style.background = hexRgba('#666666',0.50);
+		editor.style.visibility = 'visible';
+
+		if (editing) {
+			
+			// If no editing is defined then cancel the edit
+			if (editing.edit)
+				editing.edit();
+
+		}
+
+		//editor.style.visibility = 'visible';
+	}
+
+  
+  
+	function draw() {
+		renderCtx.drawImage(buffer, 0, 0);
+	}
+  
+	function onTimer() {		
+		doRender();
+		setTimeout(onTimer,1000/fps);
+	}
+	
+
+
+	initHeaders();
+	initCells();
+
+	// Set the bounding view div to be the entire size of the grid so we can scroll to 
+	// see all the data but hopefully only ever render whats visible.  We must calculate
+	// this after init, when weve set all the custom widths/heights and headers.
+	gridWidth = colWidths();
+	gridHeight = rowHeights();
+
+	// Change the view container to be the exact size of the grid for adjusting the scroll
+	// bars according to overflow:scroll css property.
+	
+	$(view).css('width',gridWidth+'px');
+	$(view).css('height',gridHeight+'px');
+
+	resize();
+
+	//setTimeout(onTimer,1000/fps);
+	
+	/*
+	function step() {
+		requestAnimationFrame(step);
+		doRender();
+	}
+	requestAnimationFrame(step);
+	*/
+
+	function animate() {
+	    var frame = performance.now();
+		//var frame = null;
+	    // Minimum framerate before we skip rendering.
+	    
+	    var skip = 1000/5;
+		var rate = 1000/30;
+
+		// The browser will pass the highres timestamp when the loop is called, but we can 
+		// provide our own timestamp to kick it off.
+	    function loop(now) {
+			//var now = performance.now();
+			//setTimeout(loop,1000/fps)
+			//setTimeout(function() {requestAnimationFrame(loop);},rate);
+			requestAnimationFrame(loop);
+			var delta = now - frame;	       
+			// Dont allow the frame rate to exceed fps...  and dont render if delta is too high
+			// since it can give the effect of sped up animation when switching tabs.
+			if (delta > skip) {
+				frame = now;	
+				console.log("skipped!");
+			} else if (delta > rate) {
+				doRender(now);
+				frame = now;
+			}
+			
+	    }
+
+	    loop(frame);
+	}
+
+	animate();
+	
+})();
+
+  
+</script>
+
+</body>
+</html>
