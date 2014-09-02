@@ -2,28 +2,28 @@
 <!--
 	HTML5 High Performance Grid 
 
-	* 	GPU based, low CPU usage.
+	*	GPU based, low CPU usage.
 
-	* 	2D canvas rendering, using double buffering and animation loop to control
-		frame rate.  
+	*	2D canvas rendering, using double buffering and animation loop to control
+		frame rate.	 
 
-	* 	Efficient 1 dimensional array storage for all cell values and headers.
+	*	Efficient 1 dimensional array storage for all cell values and headers.
 
-	* 	Fully virtualised cell rendering, effectively limitless rows/cols depending on
+	*	Fully virtualised cell rendering, effectively limitless rows/cols depending on
 		memory and requirements.
 
-	* 	Customisable cell rendering, fonts, colors, click, edit, and hover behavior.
+	*	Customisable cell rendering, fonts, colors, click, edit, and hover behavior.
 
-	* 	Animated and image based cell content.
+	*	Animated and image based cell content.
 
-	* 	Full screen app style alpha blended overlay editing using rich DOM elements
+	*	Full screen app style alpha blended overlay editing using rich DOM elements
 		form form behavior, input, and validation.
 
 
-	Company: 	OpenFin
-	 Author: 	Emerson Clarke
-	  Email: 	emerson@openfin.co, support@openfin.co
-	Website: 	http://openfin.co
+	Company:	OpenFin
+	 Author:	Emerson Clarke
+	  Email:	emerson@openfin.co, support@openfin.co
+	Website:	http://openfin.co
 
 
 	The MIT License (MIT)
@@ -63,30 +63,30 @@
 
 
 	::-webkit-scrollbar {
-	      width: 10px;
-	      height: 10px;
-	      left: -10px;
+		  width: 10px;
+		  height: 10px;
+		  left: -10px;
 	} /* this disables the default scrollbar (compulsory) */
 
 	
 	::-webkit-scrollbar-track {
-	      /*background-color: #b46868;*/
-	      background-color: rgba(250, 250, 250, 0.1); 
+		  /*background-color: #b46868;*/
+		  background-color: rgba(250, 250, 250, 0.1); 
 	} /* the new scrollbar will have a flat appearance with the set background color */
 	 
 	::-webkit-scrollbar-thumb {
 
-	      background-color: rgba(250, 250, 250, 0.5); 
-	      border-radius:10px;
+		  background-color: rgba(250, 250, 250, 0.5); 
+		  border-radius:10px;
 	} /* this will style the thumb, ignoring the track */
 	 
 	/*
 	::-webkit-scrollbar-button {
-	      background-color: rgba(250, 250, 250, 0.5); 
+		  background-color: rgba(250, 250, 250, 0.5); 
 	} *//* optionally, you can style the top and the bottom buttons (left and right for horizontal bars) */
 
 	::-webkit-scrollbar-corner {
-	      background-color: rgba(250, 250, 250, 0.1); 
+		  background-color: rgba(250, 250, 250, 0.1); 
 	} /* if both the vertical and the horizontal bars appear, then perhaps the right bottom corner also needs to be styled */
 
 	</style>
@@ -176,6 +176,7 @@
 	var gridlineSize = 1;
 
 	var rows = 5000;
+	//var rows = 50;
 	var cols = 100;
 
 	// There is one cell type per column, any row/column specific information is stored in
@@ -184,7 +185,303 @@
 	// Header specific info like width/height, style, and behavior objects can be stored in the values
 	// array at index 0 for row/col.
 
-	var values = [];
+	//var values = [];
+	var values = new Array();
+	
+	// Hint for v8 array type using literal.  These will be replaced with null during init...
+	//var values = [0,0.5,new Object(),"string",[0,0]];
+
+	// Sorting is implemented using a map of virtual row to actual row.	 This map is constructed using a list
+	// of stable sorts, which are applied in order on the data.
+
+	var sorting = true;
+	var order = [];
+
+	var sorts = [];
+
+	// Group banding is implemented as an extra pass on a sorted column that has groups enabled, multiple columns
+	// can be grouped but its up to the fill to make this meaninful i.e rgba with an alpha that helps.	This is 
+	// just a quick example of how it can be done.	But much better a single pass after sort than to paint by
+	// row order (which causes more load on the cell factory and drawing context for fill/stroke styles).
+
+	var grouping = true;
+	var group = [];
+	
+	var SortTypes = {
+		ASCENDING:"ascending",
+		DESCENDING:"descending",
+		NONE:"none"
+	}
+
+	function Sort(type,col) {
+
+		var sort = new Object();
+		sort.type = type;
+		sort.col = col;
+		sort.groups = null;
+
+		sort.value = function (array,index) {
+
+			return array[indexOf(order[index],sort.col)];
+			//return array[index];
+		}
+
+	
+		/*
+		// Check the type of the first value in the column and use that to specialise the compare.
+		// This is faster but means the type of a column cannot be mixed or change at runtime...
+		var val = sort.value(values,1);
+		if (typeof(val) == "number") {
+
+			sort.compare = function (array,first,last) {	
+				var x = this.value(array,first), y = this.value(array,last);
+				if (type == SortTypes.ASCENDING) {				
+					if (y == null) return -1;
+					return x-y;
+				} else {					
+					if (x == null) return 1;
+					return y-x;
+				}
+			}
+
+		} else {
+
+			sort.compare = function (array,first,last) {
+				var x = this.value(array,first), y = this.value(array,last);
+				if (x == null) return 1;
+				if (type == SortTypes.ASCENDING) {				
+					return x<y?-1:1;
+				} else {
+					return y<x?-1:1;
+				}
+			}
+		}
+		*/
+		
+
+
+		
+		sort.compare = function (array,first,last) {
+
+			
+			var x = this.value(array,first), y = this.value(array,last);
+
+			if (typeof(x) == "number") {
+				
+				// Numbers are compared by subtraction
+				if (this.type == SortTypes.ASCENDING) {
+					if (y == null) return -1;
+					return x-y;
+				} else {
+					if (y == null) return 1;
+					return y-x;
+				}
+
+			} else {
+				
+				// Anything not a number gets compared using the relational operators
+				if (this.type == SortTypes.ASCENDING) {
+					if (y == null) return -1;					
+					return x<y?-1:1;
+				} else {
+					if (y == null) return 1;
+					return y<x?-1:1;
+				}
+			}
+
+			return 0;
+		}
+
+		return sort;
+	}
+
+	
+	function swap(array,x,y) {
+
+		var tmp = order[x];
+		order[x] = order[y];
+		order[y] = tmp;
+
+		//var tmp = array[x];
+		//array[x] = array[y];
+		//array[y] = tmp;
+	}
+
+
+	function compare(array,first,last) {
+		var comp = 0;
+		for (var i=0;i<sorts.length;++i) {
+			
+			var sort = sorts[i];
+			if (sort.col > 0 && sort.type != SortTypes.NONE) {
+			
+				comp = sort.compare(array,first,last);
+				if (comp == 0)
+					continue;
+
+				break;
+			}
+		}
+
+		return comp;
+	}
+
+	function quicksort(array, first, last, frame, depth) {
+		// In place quickstort, stable.	 We cant use the inbuilt Array.sort() since its a hybrid sort
+		// potentially and may not be stable (non quicksort) on small sizes.
+
+
+		if (depth > 1000) {
+			var now = performance.now();
+			var delta = now - frame;
+			if (delta > 1000) {
+				// If the sort takes too long, abort to maintain a responsive ui ;)
+				initOrder();
+				console.log("sort aborted!");
+				return;
+			}
+		}		
+
+		if (depth == 0) {
+
+			// Is there something to sort ??
+			if (sorts.length <= 0)
+				return;
+
+			// Optimise for null trailing nulls.
+			var sort = sorts[0];
+			while(sort.value(array,last) == null && last > first)
+				--last;
+
+
+			// Test for worst case already sorted list...  
+			var sorted = true;
+			for (var pivot=first;pivot<last;++pivot) {
+				if (compare(array,pivot,pivot+1) > 0) {
+					sorted = false;
+					break;
+				}
+			}	
+
+			if (sorted)
+				return;
+		}
+
+		while (first < last)
+		{
+			var right	= last;
+			var left	= first;
+
+			var pivot = (first+last)>>1;
+			if (pivot < 0 || pivot >= last) break;
+
+			while(right >= left)
+			{
+
+				while (left <= right && compare(array,left,pivot) <= 0)
+					++left;
+
+
+				while (left <= right && compare(array,right,pivot) > 0)
+					--right;
+
+				if (left > right) break;
+
+				swap(array,left,right);
+				
+				if (pivot == right) pivot = left;
+
+				left++; 
+				right--;
+			}
+
+			swap(array,pivot,right);
+			right--;
+
+			// Use recursion to sort the smallest partition, this increases performance.
+			if (Math.abs(right-first) > Math.abs(last-left))
+			{
+				if (left < last) quicksort(array,left,last,frame,depth+1);	
+				last = right;
+			}
+			else
+			{
+				if (first < right) quicksort(array,first,right,frame,depth+1);
+				first = left;
+			}
+		}			
+
+	}
+
+	function reorder() {
+		initOrder();
+
+		// We skip the first row, and dont allow sorting the first column since these represent 
+		// the headers.
+		var now = performance.now()
+		quicksort(values,1,rows-1,now,0);		
+
+
+		// Single extra pass to add grouping for the sorted data if any of the sort columns sepcify a 
+		// group.  Graphically it doesnt make a heap of sense for more than one column to group data so
+		// at the moment we break after the first sort that has grouping.
+		if (grouping) {
+			for (var i=0;i<sorts.length;++i) {
+				
+				var sort = sorts[i];
+				if (sort.col > 0) {
+					if (sort.groups != null) {
+						
+						// The index will wrap on the fill styles specified in groups for as many as are
+						// in the array.
+						var index = 0;
+						var prev = null;
+						for(var row=1;row<rows;++row) {
+							var val = sort.value(values,row);
+							if (prev != null && prev != val) {
+								index = (index+1)%sort.groups.length;
+							}
+
+							group[row] = sort.groups[index];
+							prev = val;
+
+						}
+						break;
+					}
+				}
+			}
+		}
+
+
+		//console.log(order);
+	}
+
+	function orderOf(row) {
+		// Provide indirection of indexing for row/col so that we can use sort and or alternate between
+		// coloumn and row oriented sotrage.  For example to maximise performance we currently paint by
+		// column then row, so it makes sense that the data is stored as column contiguous, but that could
+		// be changed if filters or some other feature required it.	 Also at the moment sorting is faster
+		// if we can just copy a contigious section of the values array, and we sort on columns.
+
+		if (row > 0)
+			row = order[row];
+		return row;
+	}
+
+	function indexOf(row,col) {
+		//var index = (row*cols)+col;
+		var index = (col*rows)+row;
+		return index;
+	}
+
+	// The cache is a map of all values currently visible in the view, and is designed to improve performance by reducing
+	// lookups in a potentially huge array, though this hasnt been impirically prooven.	 It works by offsetting the current
+	// row/col with the first row/col for all non header cells and replacing all cached content whenever we scroll.	 The 
+	// real index is saved in the cache so we know when the cached value is invalid.
+
+	var cached = false;
+	var cache = {};
+	var cacheMiss = false;
 
 	function setValue(row,col, value) {
 		// Abstract away the details in case we wish to compress all number storage or do something 
@@ -199,12 +496,80 @@
 
 		}
 		*/
-		values[(row*cols)+col] = value;
+
+		//var index = (row*cols)+col;
+		//var index = (col*rows)+row;
+		var index = indexOf(row,col);
+
+		if (cached) {
+
+			// The data model is stored in columnar order, i.e. (col*rows)+row but the cache is still 
+			// stored in row order, not that it really matters, i.e. (row*cols)+col
+			// So index isnt valid for the cache references, we have to use the row offset by sort order
+			// here to get the correct key.
+			row = orderOf(row);
+
+			var idx = (row*cols)+col;
+			var key = null;
+			if (row == 0 || col == 0) { 
+				//console.log(typeof(value));
+				key = idx;
+			}
+			else
+			if (firstRow != -1 && firstCol != -1) {
+				key = ((row-(firstRow-1))*cols)+(col-(firstCol-1));
+			}	  
+
+			if (key != null) {
+				cache[key] = [idx,value];
+			}
+		}
+
+		values[index] = value;
 	}
 
 	function getValue(row,col) {
-		return values[(row*cols)+col];
+		
+		//var index = (row*cols)+col;
+		//var index = (col*rows)+row;
+		var index = indexOf(row,col);
+
+		if (cached) {
+
+			// With sorting and grouping the values on screen are from non-contiguous rows in the dataset
+			// so if we wish to cache them as a contigous block we have to translate the row order.
+			row = orderOf(row);
+
+			var idx = (row*cols)+col;
+			var key = null;
+			if (row == 0 || col == 0) {
+				key = idx;
+			}
+			else
+			if (firstRow != -1 && firstCol != -1) {
+				key = ((row-(firstRow-1))*cols)+(col-(firstCol-1));
+			}
+
+			if (key != null && key in cache) {
+				var entry = cache[key];
+				if (entry[0] == idx) {
+					return entry[1];
+				} else {
+					//console.log("miss!");
+					var value = values[idx];
+					cache[key] = [idx,value];
+					cacheMiss = true;
+					return value;
+				}
+			}
+		}
+
+		return values[index];
 	}
+
+
+
+
 
 	
 	var CellTypes = {
@@ -231,19 +596,20 @@
 		cell.row = row;
 		cell.col = col;
 		
-		cell.type 	= CellTypes.VALUE;
-		cell.value 	= null;		// function(row,col)
+		cell.type	= CellTypes.VALUE;
+		cell.value	= null;		// function(reset[Boolean])
+		cell.sort	= null;
 
-		cell.paint 	= null;		// function(ctx,x,y,width,height)	
-		cell.hover 	= null;		// function() [boolean]
-		cell.edit 	= null;		// function(null)
-		cell.mouse 	= null; 	// function(x,y,click[Boolean])
-		cell.key 	= null;		// function(key,down[Boolean])
+		cell.paint	= null;		// function(ctx,x,y,width,height)	
+		cell.hover	= null;		// function() [boolean]
+		cell.edit	= null;		// function(null)
+		cell.mouse	= null;		// function(x,y,click[Boolean])
+		cell.key	= null;		// function(key,down[Boolean])
 
 		// The overlay of the screen is displayed during some edit operations, but it should be optional
 		// for example depending on what key is pressed a cell might have multiple edit modes.
 
-		cell.overlay = null; 	// function() [Boolean]
+		cell.overlay = null;	// function() [Boolean]
 
 		// The editor could use either an interface where it is passed three booleans or an enum such as
 		// CellEdit above, which determine which behavior is being queried, or it could return a simple object 
@@ -260,12 +626,12 @@
 		*/
 
 
-		cell.width 	= null;		// Int
+		cell.width	= null;		// Int
 		cell.height = null;		// Int
 
-		cell.fill 	= null;		// function(text[Boolean]) String
+		cell.fill	= null;		// function(text[Boolean]) String
 		cell.stroke = null;		// function(text[Boolean]) String
-		cell.font 	= null;		// function(text[Boolean]) String
+		cell.font	= null;		// function(text[Boolean]) String
 
 
 		return cell;
@@ -289,10 +655,11 @@
 			
 			// If the cell has already been created just update with the current row/col
 			// so it can be used.
-			cell.row = row;
+			cell.row = orderOf(row);
 			cell.col = col;
 
 		} else {
+			// Create a cell, setting its row and column to be used as the template.
 			cell = cellFactory(row,col);
 			setValue(0,col,cell);
 		}		
@@ -311,7 +678,7 @@
 			return null;
 
 		// Create a cell and customise it according to the column.
-		var cell = Cell(row,col);	
+		var cell = Cell(orderOf(row),col);	
 
 		if (col == 1) {
 			
@@ -338,7 +705,7 @@
 				var val = getValue(this.row,this.col);
 				if (val == null) {
 					// Using a boolean and a float we can animate the state change using our custom paint
-					// routine.  This demonstrates the simplicity of having anything as a value...
+					// routine.	 This demonstrates the simplicity of having anything as a value...
 					val = Math.random()<0.5?false:true;
 					setValue(this.row,this.col,val);
 				} 
@@ -392,7 +759,7 @@
 				var val = getValue(this.row,this.col);
 				if (val == null) {
 					// Using a boolean and a float we can animate the state change using our custom paint
-					// routine.  This demonstrates the simplicity of having anything as a value...
+					// routine.	 This demonstrates the simplicity of having anything as a value...
 					val = [Math.random()<0.5?false:true,1.0];
 					setValue(this.row,this.col,val);
 				} 
@@ -404,20 +771,20 @@
 				ctx.strokeStyle = "white";
 				var val = this.value();
 				var radius = height/2;
-				var offset = (width-radius)*val[1];
+				var offset = width*val[1];
 
 				// Since we dont clear the canvas, fill a clean background
 				ctx.fillStyle = "white";
 				ctx.fillRect(x,y,width,height);
 
 				var btnGradient = ctx.createLinearGradient(x, y, x, y+height);
-			    btnGradient.addColorStop(0, '#333333');	
+				btnGradient.addColorStop(0, '#333333'); 
 				btnGradient.addColorStop(1, '#666666');
 
-				var arcGradient = ctx.createLinearGradient(x, y, x, y+height);   
+				var arcGradient = ctx.createLinearGradient(x, y, x, y+height);	 
 				arcGradient.addColorStop(0, '#aaaaaa');
-				arcGradient.addColorStop(1, '#777777');	
-				    
+				arcGradient.addColorStop(1, '#777777'); 
+					
 				if (val[0]) {					
 					ctx.fillStyle = btnGradient;
 					roundRect(ctx, x, y, width, height, radius, btnGradient); 
@@ -428,7 +795,7 @@
 						ctx.fillStyle = "#eeeeee";
 
 					ctx.beginPath();
-					ctx.arc(x+offset,y+radius,radius,0,2*Math.PI);
+					ctx.arc(x+Math.max(offset-radius,radius),y+radius,radius,0,2*Math.PI);
 					ctx.fill();
 
 				} else {
@@ -441,13 +808,18 @@
 						ctx.fillStyle = arcGradient;
 
 					ctx.beginPath();
-					ctx.arc(x+width-offset,y+radius,radius,0,2*Math.PI);
+					ctx.arc(x+Math.max(width-offset-radius,radius),y+radius,radius,0,2*Math.PI);
 					ctx.fill();
 
 				}
 
-				if (val[1] < 1.0)
+				if (val[1] < 1.0) {
 					val[1] += 0.25;
+
+					// If were painting using layers, then the animation is delayed so force
+					// rendering until were done.
+					setTimeout(doRender,50);
+				}
 			}
 
 			cell.edit = function() {
@@ -472,11 +844,16 @@
 		} else if (col == 9) {
 
 			cell.value = function() {
-				var hex = this.row.toString(16).toUpperCase();
-				while (hex.length < 6) {
-	     		   hex = "0" + hex;
-	    		}
-	    		return "0x"+hex;	
+				var val = getValue(this.row,this.col);
+				if (val == null) {
+					var hex = this.row.toString(16).toUpperCase();
+					while (hex.length < 6) {
+					   hex = "0" + hex;
+					}
+					val = "0x"+hex; 
+					setValue(this.row,this.col,val);
+				}
+				return val;
 			}
 
 			cell.fill = function(text) {
@@ -501,7 +878,7 @@
 			}	
 
 			cell.edit = function() {
-				$("#edit-text").show();	
+				$("#edit-text").show(); 
 				$("#edit-confirm").show();
 				var val = this.value();
 				$("#edit-text-input").val(val);
@@ -541,13 +918,20 @@
 		} else if (col%4 == 0) {
 
 			// Text cell with random data
-			var ipsum = "Lorem ipsum dolor sit amet, malis repudiare mei in. Cu munere expetendis mea, affert aliquid definiebas at nam. Te scripta delectus singulis mel, et vidit error legere eum, ea latine feugait ponderum vix. Ius ei electram patrioque, et eum propriae deseruisse necessitatibus. Epicurei adipisci ex duo. Quidam iudicabit ullamcorper ex vel, per quot ipsum ad, libris quaeque iudicabit et usu. Ut postea nominavi cum, id eius porro mundi qui. Nec ex altera dolorum definiebas, consul viderer ex est. Et duo senserit salutandi, ad vim commodo epicurei. Ad pro iusto contentiones, nominavi eloquentiam cum ne. Nam elit nullam sensibus at, putent adipiscing delicatissimi sit ex. Ut nulla salutandi eam. Has ut amet verterem, te est altera utamur liberavisse. Sed in wisi accumsan pertinax, has et dolor libris possit, homero tamquam assueverit ex vix. Sea mucius fabellas patrioque ei, no utinam munere hendrerit ius. No usu officiis delicata complectitur, ex cum summo maiestatis, facer quidam nemore eu qui. Pri in eligendi dissentias scriptorem, posse volumus luptatum quo ut. Eu eligendi efficiantur vix, pro no enim rebum posse. Sit semper cotidieque et, eum alia liber praesent ea. Malorum delenit civibus cu mea.";
 
+			//var ipsum = "Lorem ipsum dolor sit amet, malis repudiare mei in. Cu munere expetendis mea, affert aliquid definiebas at nam. Te scripta delectus singulis mel, et vidit error legere eum, ea latine feugait ponderum vix. Ius ei electram patrioque, et eum propriae deseruisse necessitatibus. Epicurei adipisci ex duo. Quidam iudicabit ullamcorper ex vel, per quot ipsum ad, libris quaeque iudicabit et usu. Ut postea nominavi cum, id eius porro mundi qui. Nec ex altera dolorum definiebas, consul viderer ex est. Et duo senserit salutandi, ad vim commodo epicurei. Ad pro iusto contentiones, nominavi eloquentiam cum ne. Nam elit nullam sensibus at, putent adipiscing delicatissimi sit ex. Ut nulla salutandi eam. Has ut amet verterem, te est altera utamur liberavisse. Sed in wisi accumsan pertinax, has et dolor libris possit, homero tamquam assueverit ex vix. Sea mucius fabellas patrioque ei, no utinam munere hendrerit ius. No usu officiis delicata complectitur, ex cum summo maiestatis, facer quidam nemore eu qui. Pri in eligendi dissentias scriptorem, posse volumus luptatum quo ut. Eu eligendi efficiantur vix, pro no enim rebum posse. Sit semper cotidieque et, eum alia liber praesent ea. Malorum delenit civibus cu mea.";
 
-			cell.value = function () {
+			var ipsum = "Lorem ipsum dolor sit amet, malis repudiare mei in. Cu munere expetendis mea, affert aliquid definiebas at nam. Te scripta delectus singulis mel, et vidit error legere eum, ea latine feugait ponderum vix. Ius ei electram patrioque, et eum propriae deseruisse necessitatibus. Epicurei adipisci ex duo. Quidam iudicabit ullamcorper ex vel, per quot ipsum ad, libris quaeque iudicabit et usu. Ut postea nominavi cum, id eius porro mundi qui. Nec ex altera dolorum definiebas, consul viderer ex est. ";
+
+			cell.value = function (reset) {
 				var val = getValue(this.row,this.col);
-				var chance = Math.random();
-				if (val == null || chance <= 0.10) {
+				if (reset) {
+					var rand = Math.random();
+					if (rand <= 0.10)
+						val = null;
+				}
+				
+				if (val == null) {
 					var index = (Math.random()*ipsum.length)-20;
 					val = ipsum.slice(index,index+20).toUpperCase();
 					setValue(this.row,this.col,val);
@@ -594,12 +978,25 @@
 
 
 		} else if (col%2 == 0) {
+
+			// Allow sort on col 2/14
+
+			if (col == 2 || col == 14 || col == 22) 
+				cell.sort = true;
+
+
 			// Editable cell with random value
 			cell.value = function () {
 				var val = getValue(this.row,this.col);
 				if (val == null) {
-					val = Math.random();
-					setValue(this.row,this.col,val);
+					if (this.col == 2) {
+						var group = rows/10;
+						val = 0.005 * Math.floor((Math.random()*group));
+						setValue(this.row,this.col,val);
+					} else {
+						val = Math.random();
+						setValue(this.row,this.col,val);
+					}
 				}
 				return val;			
 			}
@@ -622,7 +1019,7 @@
 					cancel: null,
 					validate:function () {
 						var val = $("#edit-text-input").val();
-						return parseFloat(val);	
+						return parseFloat(val); 
 					}
 				}
 			}
@@ -637,6 +1034,8 @@
 					return "#FF9933";
 				} else if (this.col%22 == 0) {
 					return (text)?"white":"#CC66FF";
+				} else if (this.col%14 == 0) {
+					return (text)?"white":"#33C999";					
 				} else if (this.col == 2) {
 					return (text)?"white":"#CC0066";
 				}
@@ -647,7 +1046,7 @@
 	
 		} else {
 
-			cell.value = function () {
+			cell.value = function (reset) {
 				var val = getValue(this.row,this.col);
 				if (val == null) {
 					val = Math.random();
@@ -657,7 +1056,7 @@
 						val = [val,performance.now()];
 
 					setValue(this.row,this.col,val);
-				} else {
+				} else if (reset) {
 
 					var rand = Math.random();
 					if ((rand*10000) <= 100) {
@@ -716,7 +1115,7 @@
 					validate:function () {
 						if (this.col%3 != 0) return true;
 						var val = $("#edit-text-input").val();
-						return parseFloat(val);	
+						return parseFloat(val); 
 					}
 				}
 			}
@@ -777,12 +1176,65 @@
 	function initCells() {
 		for (var row=1;row<rows;++row) {
 			for(var col=1;col<cols;++col) {
-				setValue(row,col,null);
+				//setValue(row,col,null);
+				var cell = cellTemplate(row,col);
+				cell.value();
 			}
 		}
 	}
+
+	function initValues() {
+		// Initialise the values in a contiguous way to ensure v8 keeps an efficient internal
+		// representation.
+		for (var cell=0;cell<rows*cols;++cell) {			
+			values[cell] = null;
+		}
+	}
 	
+	function initOrder(){
+		order = [];
+		group = [];
+
+		// Re-initialise the row order, as this is what we sort, not the actual data.
+		for (var i=0;i<rows;++i) {
+			order[i] = i;
+			if (grouping)
+				group[i] = null;
+		}
+	}
 	
+	function Layer() {
+		var layer = new Object();
+		layer.canvas = document.createElement("canvas");
+		layer.ctx = layer.canvas.getContext('2d');
+		//layer.ctx.scale(1,1);
+		layer.ctx.imageSmoothingEnabled = false;
+		
+		layer.clear = function() {
+			this.ctx.clearRect(0,0,this.canvas.width,this.canvas.height);
+		}
+		layer.now = function(now) {
+			if (this.frame == null) this.frame = now;
+			this.delta = now - this.frame;
+		}
+
+		layer.resize = function(width,height) {
+			this.canvas.width = width;
+			this.canvas.height = height;
+		}
+
+		layer.delta = null;
+		layer.frame = null;
+		return layer;
+	}
+
+	var layers = true;
+	var cellLayer = Layer();
+	var selectLayer = Layer();
+	var hoverLayer = Layer();
+	var animLayer = Layer();
+
+
 	var wrapper = document.getElementById('wrapper');
 	var view = document.getElementById('view');
 
@@ -793,6 +1245,7 @@
 		
 	// Use pre-rendering, 40% faster
 	// http://jsperf.com/render-vs-prerender
+	
 	var buffer = document.createElement('canvas');
 	var bufferCtx = buffer.getContext('2d');
 	//bufferCtx.scale(1,1);
@@ -882,12 +1335,12 @@
 			if (editing && e.keyCode == keyCodes['enter']) {
 				if (submitEdit()) {
 					e.cancelBubble = true;
-					e.preventDefault();	
+					e.preventDefault(); 
 				}
 			}						
 
 			// Pass all events back to the browser so the edit cell has a chance to process
-			// them in the DOM.  But the edit cell should itself cancel all events after its
+			// them in the DOM.	 But the edit cell should itself cancel all events after its
 			// done with them...  if we dont do this then we cant type anything into the dom
 			// form fields :)
 
@@ -931,7 +1384,7 @@
 				}
 									
 				// Dont allow selectedX to go negative if the screen is too slow to scroll to update or we
-				// end up drawing the selection rect over the headers.  By returning above we allow the browser
+				// end up drawing the selection rect over the headers.	By returning above we allow the browser
 				// to process the key events which causes the scrolling...
 				
 				console.log("selectedCol",selectedCol,"selectedX",selectedX,"selectedWidth",selectedWidth);					
@@ -953,7 +1406,7 @@
 					}
 
 					// Try to use the event bubble to implement arrow scrolling once we reach the end of the
-					// screen.  Arrow keys by default scroll up/down left/right so all we have to do is let
+					// screen.	Arrow keys by default scroll up/down left/right so all we have to do is let
 					// the events throug by returning early.
 					
 					// Update selectedX using the previous selectedWidth, then update selectedWidth and see
@@ -1094,6 +1547,10 @@
 	var hoverX = -1;
 	var hoverWidth = -1;
 
+	// To optimise the hover calculation we need a delta between the scroll offset
+	var hoverScrollLeft = -1;
+	var hoverScrollTop = -1;
+
 	// This is the window width/height at the moment but it might represent something else later... 
 	// we dont want to render outside the necessary area.  It gets updated on resize.
 	var viewWidth = 0;
@@ -1116,8 +1573,8 @@
 	var firstX = -1;
 	var lastX = -1;
 			
-	// The selection is a set of cell coordinates, either [row,col] or [r1,c1,r2,c2]     
-	// for an area.  It works like a stack too, so you can have multiple regions.
+	// The selection is a set of cell coordinates, either [row,col] or [r1,c1,r2,c2]	 
+	// for an area.	 It works like a stack too, so you can have multiple regions.
 	// The selected cell is always known, so we can extend a selection.
 	
 	// Default the first selected row/col to 1,1 so it can be seen
@@ -1130,15 +1587,55 @@
 
 	
 	var selection = [];
+	var selections = {}
+
+	function addSelectionIndex(region) {
+		region = normSelection(region);
+		if (region.length == 4) {
+			for (var row=region[0];row<=region[2];++row) {
+				for (var col=region[1];col<=region[3];++col) {
+					selections[indexOf(row,col)] = true;
+				}
+			}
+
+		} else {
+			var r1 = region[0], c1 = region[1];
+			selections[indexOf(r1,c1)] = true;
+		}
+
+	}
+
+	function delSelectionIndex(region) {
+		region = normSelection(region);
+		if (region.length == 4) {
+			for (var row=region[0];row<=region[2];++row) {
+				for (var col=region[1];col<=region[3];++col) {
+					delete selections[indexOf(row,col)];
+				}
+			}
+		} else {
+			var r1 = region[0], c1 = region[1];
+			delete selections[indexOf(r1,c1)];
+		}
+	}
 
 	function addSelection(region) {
-		if (!hasSelection(region))
-			selection.push(region);
+		if (!hasSelection(region)) {
+			
+			// Update the indexed selections
+			addSelectionIndex(region);
+			
+			selection.push(region);			
+		}
 
 		//console.log("selection: " + selection);
 	}
 
 	function delSelection(region) {
+		
+		// Update the indexed selections
+		delSelectionIndex(region);
+
 		region = normSelection(region);
 		for(var i=0;i<selection.length;++i) {
 			var sel = normSelection(selection[i]);
@@ -1148,6 +1645,12 @@
 	}
 
 	function isSelected(row,col) {
+
+		if (selections.hasOwnProperty(indexOf(row,col))){
+			return true;
+		}
+
+		/*
 		for(var i=0;i<selection.length;++i) {			
 			var sel = normSelection(selection[i]);	
 			if (sel.length == 4) {
@@ -1159,7 +1662,7 @@
 				if (sel[0] == row && sel[1] == col)
 					return true;
 			}
-		}
+		}*/
 
 		return false;
 	}	
@@ -1207,23 +1710,28 @@
 		}
 
 		var index = selection.length-1;
-
 		var sel = selection[index];
 
 		var row = region[0];
 		var col = region[1];
 
 		if (sel.length == 4) {
+			// Update the indexed selections
+			delSelectionIndex(sel);
+
 			sel[2] = row, sel[3] = col;
 		} else {
-			var region = [sel[0],sel[1],row,col];
-			//sel[0] = row, sel[1] = col;
-			selection[index] = region;
+			sel = [sel[0],sel[1],row,col];
+			selection[index] = sel;
 		}
+
+		// Update the indexed selections
+		addSelectionIndex(sel);
 	}
 
 	function clearSelection() {
 		selection = [];
+		selections = {};
 	}
 
 	
@@ -1250,7 +1758,7 @@
 			ctx.stroke();
 	
 		if (fill)
-			ctx.fill();     
+			ctx.fill();		
 	}
 
 	function hexRgbArray(hex) {
@@ -1287,7 +1795,7 @@
 				delta = e.wheelDelta/120;
 		} 
 
-		//console.log("wheel: " + delta);       
+		//console.log("wheel: " + delta);		
 		
 		// Stop sheer during mouse wheel page like scrolling by forcing a render.
 		if (Math.abs(delta) > 10)
@@ -1302,7 +1810,7 @@
 
 			// If we try to wheel past the beginning of the screen, try to stop the sheer thats seen in osx
 			if (scrollLeft+e.deltaX < 0 || scrollTop+e.deltaY < 0) {
-	        	e.returnValue = false;
+				e.returnValue = false;
 				e.preventDefault();
 			}
 		}
@@ -1367,10 +1875,17 @@
 		if (!boundsTest(mouseX,mouseY,wrapper.offsetLeft,wrapper.offsetTop,wrapper.offsetWidth,wrapper.offsetHeight))
 			return;
 
+
+
 		// Offset the mouse coordinates to the grid
 		mouseX -= wrapper.offsetLeft;
 		mouseY -= wrapper.offsetTop;
 
+
+
+
+
+		/*
 		//console.log("mouse: ("+ mouseX +","+ mouseY +")");
 
 		var x = firstX;
@@ -1418,16 +1933,124 @@
 
 			y += height+gridlineSize;	
 		}
+
+		*/
+
+		var row,col;
+		var x, y, height, width;
+			
+		function findX(dir) {
+			col = hoverCol;
+			//x = hoverX;
+			width = hoverWidth;
+
+			hoverCol = hoverX = hoverWidth = -1;
+
+			while (true) {
+				if (mouseX > rowHeaderSize && mouseX >= x && mouseX < x+width+gridlineSize) {
+					hoverCol = col;
+					hoverX = x;
+					hoverWidth = width;
+					hoverScrollLeft = scrollLeft;
+					return true;
+				}
+				
+				if (dir > 0) {
+					if (col >= lastCol)
+						return false;			
+						
+					x += width+gridlineSize;
+					++col;
+					width = colWidth(col);
+					
+				} else {
+					if (col <= firstCol)
+						return false;
+						
+					--col;
+					width = colWidth(col);
+					x -= width+gridlineSize;						
+				}
+			}
+		}
+		
+		
+		function findY(dir) {
+			row = hoverRow;
+			//y = hoverY;
+			height = hoverHeight;
+
+			hoverRow = hoverY = hoverHeight = -1;
+
+			while (true) {
+				if (mouseY > colHeaderSize && mouseY >= y && mouseY < y+height+gridlineSize) {	
+					hoverRow = row;
+					hoverY = y;
+					hoverHeight = height;
+					hoverScrollTop = scrollTop;
+					return true;
+				}
+				
+				if (dir > 0) {
+					if (row >= lastRow)
+						return false;			
+					
+					y += height+gridlineSize;
+					++row;
+					height = rowHeight(row);
+					
+				} else {
+					if (row <= firstRow)
+						return false;
+						
+					--row;
+					height = rowHeight(row);
+					y -= height+gridlineSize;						
+				}
+			}
+		}
+
+
+
+		if (hoverCol < firstCol) {
+			hoverCol = firstCol;
+			hoverWidth = colWidth(hoverCol);
+			hoverX = firstX;
+			hoverScrollLeft = scrollLeft;
+		}
+
+		if (hoverRow < firstRow) {
+			hoverRow = firstRow;
+			hoverHeight = rowHeight(hoverRow);
+			hoverY = firstY;
+			hoverScrollTop = scrollTop;
+		}
+
+
+		// The X/Y coordinates must be offset by any difference in scroll since last time we tracked the mouse
+		// movement.
+		x = hoverX-(scrollLeft-hoverScrollLeft);
+		y = hoverY-(scrollTop-hoverScrollTop);
+		
+		if (mouseX >= x)
+			findX(1);
+		else if (mouseX < x)
+			findX(-1);
+			
+		if (mouseY >= y)
+			findY(1);
+		else if (mouseY < y)
+			findY(-1);		
 	}
 
 
 	function scrollSelected() {
 
 		if(document.createEvent) {
-	        var eventObj = document.createEvent("Events");
-	        eventObj.initEvent("scroll", true, true);
-	        window.dispatchEvent(eventObj);
-	    }
+			var eventObj = document.createEvent("Events");
+			eventObj.initEvent("scroll", true, true);
+			window.dispatchEvent(eventObj);
+		}
 	}
 
 	//$(window).scroll(function(){
@@ -1435,36 +2058,38 @@
 
 		// Row and column headers and scrolling.
 
-	    //console.log(window.scrollX,window.scrollY,gridWidth,gridHeight);
-	    
-	    // FIXME
-	    // This should really be using viewWidth/viewHeight but im experimenting with overdraw to try
-	    // and get the scroll to be smoother at the moment.  Scrolling should not exceed the extents
-	    // of the grid minus the window/view width/height.
+		//console.log(window.scrollX,window.scrollY,gridWidth,gridHeight);
+		
+		// FIXME
+		// This should really be using viewWidth/viewHeight but im experimenting with overdraw to try
+		// and get the scroll to be smoother at the moment.	 Scrolling should not exceed the extents
+		// of the grid minus the window/view width/height.
 
-	    var maxScrollWidth = gridWidth-wrapper.offsetWidth;
-	    if (wrapper.scrollLeft < maxScrollWidth)
+		var maxScrollWidth = gridWidth-(wrapper.offsetWidth-rowHeaderSize);
+		if (wrapper.scrollLeft < maxScrollWidth) {
 			scrollLeft = wrapper.scrollLeft;
-		else
+		} else { 
 			scrollLeft = maxScrollWidth;
-		//	e.preventDefault();
+			e.preventDefault();
+			e.cancelBubble = true;
+		}
 
 		var maxScrollHeight = gridHeight-wrapper.offsetHeight;
 		if (wrapper.scrollTop < maxScrollHeight)
-	    	scrollTop = wrapper.scrollTop;
+			scrollTop = wrapper.scrollTop;
 		else
 			scrollTop = maxScrollHeight;
-		//	e.preventDefault();	
+		//	e.preventDefault(); 
 
 
-	    render.style.left = scrollLeft+"px";
+		render.style.left = scrollLeft+"px";
 		render.style.top = scrollTop+"px";
 
 
-	    if (scrollLeft > 0 && scrollTop > 0) {
+		if (scrollLeft > 0 && scrollTop > 0) {
 
 			doRender();
-	    }
+		}
 	}
 	//});
 
@@ -1480,6 +2105,99 @@
 		clicked = true;
 
 		console.log("click: "+ clickX +","+ clickY);		   
+
+
+		if (layers) {
+			// If we want layers to render in different order, we have to process the selection adding faster
+			// than the cells are re-rendered.	So we need a loop here...
+			clickSelection();
+			
+		}	
+
+
+		// Toggle sort columns
+		if (hitTest(0,0,rowHeaderSize,colHeaderSize)) {
+			initOrder();
+			for (var i=0;i<sorts.length;++i) {
+				sorts[i].type = SortTypes.NONE;
+			}
+		} else {
+			var x = firstX;			
+			for (var col=firstCol;col<=lastCol;++col) {				 
+				var width = colWidth(col);
+
+				if (hitTest(x,0,width,colHeaderSize)) {
+
+					// Does this column have a sort
+					for (var i=0;i<sorts.length;++i) {
+						var sort = sorts[i];	
+						if (sort.col  == col) {
+							var cell = cellTemplate(0,col);
+
+							// The cell must also have sort enabled for it to be togglable...
+							if (sort.type != null && cell.sort == true) {
+								if (sort.type == SortTypes.ASCENDING)
+									sort.type = SortTypes.DESCENDING;
+								else
+								if (sort.type == SortTypes.DESCENDING)
+									sort.type = SortTypes.NONE;
+								else
+								if (sort.type == SortTypes.NONE)
+									sort.type = SortTypes.ASCENDING;
+
+								reorder();	
+								doRender();			
+							}							
+
+							break;
+						}
+					}
+
+					
+				}
+
+				x += width+gridlineSize;
+			}	
+		}
+		
+	}
+
+	function clickSelection() {
+		var x = firstX;			
+		for (var col=firstCol;col<=lastCol;++col) {				 
+			var width = colWidth(col);
+
+			var y = firstY; 
+			for (var row=firstRow;row<=lastRow;++row) {
+				var height = rowHeight(row);
+
+				if (hitTest(x,y,width,height)) {
+					// Update selection, and clear all others since this was a click
+					selectedRow = row;							
+					selectedCol = col;
+					selectedX = x, selectedY = y, selectedHeight = height, selectedWidth = width;
+
+					var region = [selectedRow,selectedCol];
+					if (hasKey('shift')) {
+						updateSelection(region);
+					} else {
+						clearSelection();
+						addSelection(region);
+					}
+
+					// Consume the click event so that no other hittest can succeed during paint
+					clicked = true;
+					doRender();
+					return;
+
+				}
+
+
+				y += height+gridlineSize;
+			}
+
+			x += width+gridlineSize;
+		}		
 	}
 	
 	function resize() {
@@ -1490,8 +2208,10 @@
 		// window innner width/height that was abstracted from the window object so that the grid could be
 		// used more like a control, not just against a full window.
 
-		viewWidth = $(wrapper).width()+200;
-		viewHeight = $(wrapper).height()+200;
+		//viewWidth = $(wrapper).width()+200;
+		viewWidth = $(wrapper).width();
+		//viewHeight = $(wrapper).height()+200;
+		viewHeight = $(wrapper).height();
 
 		render.width = viewWidth;
 		//render.width = 768;
@@ -1509,6 +2229,12 @@
 		buffer.width = render.width;
 		buffer.height = render.height;
 
+		if (layers) {
+
+			cellLayer.resize(render.width,render.height);
+			selectLayer.resize(render.width,render.height);
+			hoverLayer.resize(render.width,render.height);
+		}
 		
 		cancelEdit();
 		doRender();
@@ -1538,7 +2264,8 @@
 
 		// Get the raw cell without any factory modifications because we 
 		// just want the basic info.
-		var cell = getValue(0,col);
+		//var cell = getValue(0,col);
+		var cell = cellTemplate(0,col);
 		if (cell != null && cell.width != null) {
 			return cell.width;
 		}
@@ -1600,7 +2327,7 @@
 	
 	function hitTest(x,y,width,height) {
 		if (clickX > -1 && clickY > -1) {
-			if (clickX >= x && clickX < x+width && clickY >= y && clickY < y+height) {
+			if (clickX >= x && clickX < x+width+gridlineSize && clickY >= y && clickY < y+height+gridlineSize) {
 				return true;
 			}
 		}
@@ -1609,16 +2336,24 @@
 	}
 	
 	
-	function doRender() {	 
+	function doRender(now) {	 
+		var force=false;
+		if (now == null) {
+			now = performance.now();
+			force = true;
+		}
+		
 		// We paint on resize, or on timer
-		paint();	
-		draw();
+		paint(now,force);	
+		draw(now);
 	} 
 	
 	
-	function paint() {
+	function paint(now,force) {
 	
-		var ctx = bufferCtx;
+		var ctx = null;
+		if (!layers)
+			ctx = bufferCtx;
 
 		// No need to clear as we redraw everything anyway...
 		//ctx.clearRect(0,0,viewWidth,viewHeight);
@@ -1648,46 +2383,208 @@
 
 
 		//if (cells) {
-			paintCells(ctx,offsetX,offsetY);
-		//}
-		
-		// Each cell should be represented as a mid point on the cell location to support zooming and overlay of html5 
-		// controls/widgets which can be made even more functional than a conventional grid.	Usually win32 is limited
-		// because controls arent easy to re-parent and overlay, in html5 we can do anything we want including zooming 
-		// in and out and scrolling the background in real time and its easy :)
-		
-		//if (gridlines) {
-			paintGridlines(ctx,offsetX,offsetY);
-		//}
+			if (layers) {
+				cellLayer.now(now);
+				if (force || cellLayer.delta > (1000/5)) {
+					cellLayer.frame = now;
+					// The cell layer doesnt need clearing since its fully re-drawn, unless the grid is smaller than 
+					// the view.
+					if (gridHeight < viewHeight	 || gridWidth < viewWidth)
+						cellLayer.clear();	
 
-		// if (selected) {
-			if (selectedX > 0 && selectedY > 0) {
+					paintCells(cellLayer.ctx,offsetX,offsetY);
+
+				// Each cell should be represented as a mid point on the cell location to support zooming and overlay of html5 
+				// controls/widgets which can be made even more functional than a conventional grid.	Usually win32 is limited
+				// because controls arent easy to re-parent and overlay, in html5 we can do anything we want including zooming 
+				// in and out and scrolling the background in real time and its easy :)
 				
-				// Selected cell rect, something close to XOR.  Should be drawn underneath the headers
-				// so that the headers cover any overlap.
+				//if (gridlines) {
+					paintGridlines(cellLayer.ctx,offsetX,offsetY);
+				//}
 
-				// http://tutorials.jenkov.com/html5-canvas/composition.html
-				ctx.save();
-				ctx.globalCompositeOperation = "source-atop";
-				// Same color as hover, but less alpha
-				ctx.strokeStyle = hexRgba("#DDDDFF",0.7);
-				//ctx.strokeStyle = hexRgba("#333333",0.7);
-				ctx.lineWidth = 4;
-				ctx.strokeRect(selectedX-1,selectedY-1,selectedWidth+2,selectedHeight+2);
-				ctx.restore();				
+				paintGroups(cellLayer.ctx,offsetX,offsetY);
+	
+
+				} else {
+					//console.log("skip!");
+				}
+
+				
+
+			} else {
+				
+				paintCells(ctx,offsetX,offsetY);
+
+				//if (gridlines) {
+					paintGridlines(ctx,offsetX,offsetY);
+				//}
+
+
+				paintGroups(ctx,offsetX,offsetY);							
 			}
+
+		//}
+			
+
+		// if (selected) {			
+			if (layers) {
+				selectLayer.now(now);
+				if (force || selectLayer.delta > 15/*1000/fps*/) {				
+					selectLayer.frame = now;
+					selectLayer.clear();
+					paintSelection(selectLayer.ctx,offsetX,offsetY);
+
+					//if (headers) {
+						// 0 means no header
+						paintHeaders(selectLayer.ctx,0,0);
+					//}						
+				}
+			
+			}
+			else
+			{
+
+				paintSelection(ctx,offsetX,offsetY);
+				//if (headers) {
+					// 0 means no header
+					paintHeaders(ctx,0,0);
+				//}		
+			}
+
 		//}
 
-		//if (headers) {
-			// 0 means no header
-			paintHeaders(ctx,0,0);
-		//}
 		
 		//if (hover) {
+			if (layers) {
+				hoverLayer.now(now);
+				if (force || hoverLayer.delta > 30/*1000/fps*/) {
+					hoverLayer.frame = now;
+					hoverLayer.clear();
+					paintHover(hoverLayer.ctx,0,0);
+				}
+			} else {
+				paintHover(ctx,0,0);
+			}
 
-			paintHover(ctx,0,0);
+		//} 
+	}
 
-		//}	
+	function paintGroups(ctx,offsetX,offsetY) {
+
+		if (!grouping)
+			return;
+
+		//ctx.save();
+		//ctx.globalCompositeOperation = "lighter";
+
+		var x = firstX;
+		var y = firstY; 
+		for (var row=firstRow;row<=lastRow;++row) {
+			var height = rowHeight(row);
+
+			var fill = group[row];
+			if (fill != null) {
+
+				if (fill != ctx.fillStyle)
+					ctx.fillStyle = fill;
+
+				ctx.fillRect(x,y,viewWidth,height);
+			}
+
+			y += height+gridlineSize;
+		}
+
+		//ctx.restore();
+
+
+	}
+
+	function paintSelection(ctx,offsetX,offsetY) {
+
+		if (selection.length == 0)
+			return;
+
+		//if (!(selectedX > 0 && selectedY > 0))
+		//	return;
+
+		
+		var x = firstX;			
+		for (var col=firstCol;col<=lastCol;++col) {				 
+			var width = colWidth(col);
+
+			var y = firstY; 
+			for (var row=firstRow;row<=lastRow;++row) {
+				var height = rowHeight(row);
+
+
+				var selected = false;
+				if (selectedRow == row && selectedCol == col) {
+					
+					selected = true;					
+				}
+
+
+				//var cell = cellValue(row,col);
+				//var style = cellStyle(row,col);
+
+				var cell = cellTemplate(row,col);
+
+				// We can either pass the selection painting function into the custom paint routine
+				// or have some other way of delaying text writing so that we draw text ontop of 
+				// selection, or just ignore it and always draw selection last.
+
+				// And overlay selection...
+				if (selected || isSelected(row,col)) {
+
+					var hover = true;
+					if (selected && cell.hover) {
+						hover = cell.hover();
+					}
+
+					if (!selected || hover) {
+						// If its part of the selection but not the selected cell, or if it is the selected cell
+						// and hover is allowed, then draw the selection overlay (as opposed to the fulls screen
+						// edit overlay) over this individual cell.
+
+						//ctx.fillStyle = hexRgba('#EEDDFF',0.5);
+						//ctx.fillStyle = hexRgba('#EEDDFF',0.5);
+						if (selected)
+							//ctx.fillStyle = hexRgba("#DDDDFF",0.5);
+							//ctx.fillStyle = hexRgba("#333333",0.5);
+							ctx.fillStyle = hexRgba("#FFFFFF",0.5);						
+							//ctx.fillStyle = hexRgba("#DDDDFF",0.75);
+						else
+							//ctx.fillStyle = hexRgba("#666666",0.5);
+							ctx.fillStyle = hexRgba("#6699FF",0.5);							
+					
+					
+						ctx.fillRect(x,y,width,height);
+				
+					}
+				}
+
+
+				y += height+gridlineSize;
+			}
+
+			x += width+gridlineSize;
+		}
+
+		// Selected cell rect, something close to XOR.	Should be drawn underneath the headers
+		// so that the headers cover any overlap.
+
+		// http://tutorials.jenkov.com/html5-canvas/composition.html
+		//ctx.save();
+		//ctx.globalCompositeOperation = "source-atop";
+		// Same color as hover, but less alpha
+		//ctx.strokeStyle = hexRgba("#DDDDFF",0.7);
+		ctx.strokeStyle = hexRgba("#6699FF",0.7);
+		//ctx.strokeStyle = hexRgba("#333333",0.7);
+		ctx.lineWidth = 4;
+		ctx.strokeRect(selectedX-1,selectedY-1,selectedWidth+2,selectedHeight+2);
+		//ctx.restore();		
+
 	}
 
 	function paintHover(ctx,offsetX,offsetY) {
@@ -1735,7 +2632,7 @@
 					ctx.font = 'bold 12px Arial';
 					var measure = ctx.measureText(val.toString()).width;
 					if (measure > width) {
-						var offset = (measure-width)/2;  
+						var offset = (measure-width)/2;	 
 						x -= offset;
 						width += offset*2;			
 					}
@@ -1773,31 +2670,36 @@
 		var y = offsetY;
 
 		var colGradient = ctx.createLinearGradient(x, y, x, colHeaderSize);
-	    colGradient.addColorStop(0, '#666666');   
-	    colGradient.addColorStop(1, '#333333');
+		colGradient.addColorStop(0, '#666666');	  
+		colGradient.addColorStop(1, '#333333');
 
 
 		var rowGradient = ctx.createLinearGradient(x, y, rowHeaderSize, y);
-	   	rowGradient.addColorStop(0, '#666666');   
-	    rowGradient.addColorStop(1, '#333333');
+		rowGradient.addColorStop(0, '#666666');	  
+		rowGradient.addColorStop(1, '#333333');
 
-	    //console.log("cartesian: ("+ x +","+ y +"), ("+ width +","+ height +")"); 
+		//console.log("cartesian: ("+ x +","+ y +"), ("+ width +","+ height +")"); 
 
-	    var txtGradient = ctx.createLinearGradient(x, y, x, colHeaderSize);
-	    txtGradient.addColorStop(0, '#999999');
-	    txtGradient.addColorStop(1, '#333333');
+		var txtGradient = ctx.createLinearGradient(x, y, x, colHeaderSize);
+		txtGradient.addColorStop(0, '#999999');
+		txtGradient.addColorStop(1, '#333333');
 		
 		if (rowHeaderSize) {
-		
-			height = cellHeight(row,0);
+
+			// All rows are the same fixed height at the moment...
+			height = cellHeight(1,0);
 
 			// Row headers
 
 			x = offsetX;
-			y = offsetY+colHeaderSize+gridlineSize;
+			y = offsetY+colHeaderSize;
 		
 			ctx.fillStyle = rowGradient;
 			ctx.fillRect(x,y,rowHeaderSize,viewHeight);
+
+			// We overdraw the header rect a bit to stop nasty pixels slipping between the corner cell and the headers
+			// same goes for the col header.
+			y += gridlineSize;
 		
 			ctx.beginPath();
 			ctx.strokeStyle = '#999999';
@@ -1806,32 +2708,30 @@
 			ctx.moveTo(x+rowHeaderSize,y);
 			ctx.lineTo(x+rowHeaderSize,y+viewHeight);
 		
-			y = firstY;
-			for (var row=firstRow;row<lastRow;++row) {
-
-				ctx.moveTo(x, y);
-				ctx.lineTo(x+rowHeaderSize, y);
-
-				y += height+gridlineSize;
-			}
-
-			ctx.stroke();		
-
-			// Row header labels
 			ctx.font = 'bold 10px Arial';
 			y = firstY;
 			for (var row=firstRow;row<lastRow;++row) {
-				
-				var id = (row).toString();
+
+				// Gridlines
+				ctx.moveTo(x, y);
+				ctx.lineTo(x+rowHeaderSize, y);
+
+				// Row header labels
+
+				//var id = (row).toString();
+				var id = orderOf(row).toString();
 
 				// Drop shaddow text
 				ctx.fillStyle = "#333333";
 				ctx.fillText(id, x+6+1, y+(height/2)+4+1);			
 				ctx.fillStyle = "#888888";
-				ctx.fillText(id, x+6, y+(height/2)+4);					
+				ctx.fillText(id, x+6, y+(height/2)+4);	
+
 
 				y += height+gridlineSize;
-			}		
+			}
+
+			ctx.stroke();	
 
 		}
 
@@ -1839,11 +2739,13 @@
 			
 			// Column headers
 
-			x = offsetX+rowHeaderSize+gridlineSize;
+			x = offsetX+rowHeaderSize;
 			y = offsetY;	
 			
 			ctx.fillStyle = colGradient;
 			ctx.fillRect(x,y,viewWidth,colHeaderSize);
+
+			x += gridlineSize;
 
 			ctx.beginPath();
 			ctx.strokeStyle = '#999999';			
@@ -1852,27 +2754,20 @@
 			ctx.moveTo(x,y+colHeaderSize);
 			ctx.lineTo(x+viewWidth,y+colHeaderSize);			
 
+			ctx.font = 'bold 12px Arial';
+
 			x = firstX;
 			for (var col=firstCol;col<lastCol;++col) {
-
+				
 				width = cellWidth(0,col);
 				
+				// Gridlines
+
 				ctx.moveTo(x, y);
 				ctx.lineTo(x, y+colHeaderSize);		
 
-				x += width+gridlineSize;
-			}
+				// Column header labels
 
-			ctx.stroke();
-
-
-			// Column header labels
-			
-			ctx.font = 'bold 12px Arial';
-			x = firstX;
-			for (var col=firstCol;col<lastCol;++col) {
-				width = cellWidth(0,col);
-			
 				var id = colCode(col);
 
 				// Drop shaddow text
@@ -1880,15 +2775,53 @@
 				ctx.fillText(id, x+6+1, y+(colHeaderSize/2)+5+2);			
 				ctx.fillStyle = txtGradient;
 				ctx.fillText(id, x+6, y+(colHeaderSize/2)+5);			
+				
+				var cell = cellTemplate(0,col);
+				if (cell.sort != null) {		
+					/*
+						.icon-align-left {
+						  background-position: -264px -48px;
+						}
 
+						.icon-align-center {
+						  background-position: -288px -48px;
+						}
+					*/			
+					var img=document.getElementById("glyphs");
+					var imgX = 264;
+					var imgY = 48;
+					var sort = null;
+					for (var i=0;i<sorts.length;++i)
+						if (sorts[i].col == col) {
+							sort = sorts[i];
+							break;
+						}
+
+					if (sort != null) {
+						if (sort.type == SortTypes.NONE)
+							imgX = 288;
+
+						if (sort.type == SortTypes.DESCENDING) {
+							ctx.save();
+							ctx.rotate(180*Math.PI/180);
+							ctx.drawImage(img,imgX,imgY,14,14,-(x+width-20),-(y+(colHeaderSize/2)),-14,-14);		
+							ctx.restore();
+						} else {
+							ctx.drawImage(img,imgX,imgY,14,14,x+width-20,y+(colHeaderSize/2),14,14);	
+						}
+					}	
+				}
 
 				x += width+gridlineSize;
+
 			}
+
+			ctx.stroke();
 			
 		}
 		
 		if (rowHeaderSize || colHeaderSize) {	
-
+			
 			// Corner
 			x = offsetX;
 			y = offsetY;
@@ -1896,20 +2829,28 @@
 			ctx.fillStyle = colGradient;
 			ctx.fillRect(x,y,rowHeaderSize,colHeaderSize);
 			
-			ctx.strokeStyle = '#666666';
-			ctx.lineWidth = gridlineSize;
-      		/*
 			ctx.beginPath();
+			ctx.strokeStyle = '#999999';
+			ctx.lineWidth = gridlineSize;
+
+			//.icon-qrcode {
+			//	background-position: -432px -24px;
+			//}
+
+			if (cacheMiss == true) {
+				var img=document.getElementById("glyphs");
+				var imgX = 432;
+				var imgY = 0;
+				ctx.drawImage(img,offsetX,offsetY,14,14,x+10,y+10,14,14);
+				cacheMiss = false;
+			}
+
 			ctx.moveTo(x+rowHeaderSize+gridlineSize,y);
-			ctx.lineTo(x+rowHeaderSize+gridlineSize,y+colHeaderSize);
-			ctx.moveTo(x,y+colHeaderSize+gridlineSize);
-			ctx.lineTo(x+rowHeaderSize,y+colHeaderSize+gridlineSize);
+			ctx.lineTo(x+rowHeaderSize+gridlineSize,y+colHeaderSize+gridlineSize);
+			ctx.lineTo(x,y+colHeaderSize+gridlineSize);
+			
 			ctx.stroke();
-			*/
-
-			ctx.strokeRect(x,y,rowHeaderSize+1,colHeaderSize+1);
 		}
-
 
 	}
   
@@ -1937,7 +2878,7 @@
 			if (x+width >= 0) {
 
 				if (firstCol == -1) {							
-					firstCol = col;	
+					firstCol = col; 
 					firstX = x;
 				}
 
@@ -1954,31 +2895,43 @@
 
 
 						// Test for mouse click in cell
-						if (clicked && 	hitTest(x,y,width,height)) {
+						if (clicked &&	hitTest(x,y,width,height)) {
 							
 							//console.log("hit: ("+ x +","+ y +"), ("+ width +","+ height +")");				
 							hit = true;
 							hitX = x, hitY = y, hitWidth = width, hitHeight = height;
 						
-								
-							if (clicked) {
-								// Update selection, and clear all others since this was a click
-								selectedRow = row;							
-								selectedCol = col;
+							if (layers) {
 
-								var region = [selectedRow,selectedCol];
-								if (hasKey('shift')) {
-									updateSelection(region);
-								} else {
-									clearSelection();
-									addSelection(region);
+								clicked = false;
+								selectedRow = row;
+								selectedCol = col;
+							
+							} else {
+
+	
+								// Disabled for different layers, because the selection must be tested more
+								// rapidly if the cell painting is slowed down.
+					
+								if (clicked) {
+									// Update selection, and clear all others since this was a click
+									selectedRow = row;							
+									selectedCol = col;
+
+									var region = [selectedRow,selectedCol];
+									if (hasKey('shift')) {
+										updateSelection(region);
+									} else {
+										clearSelection();
+										addSelection(region);
+									}
+
+									// Consume the click event so that no other hittest can succeed during paint
+									clicked = false;
+
 								}
 
-								// Consume the click event so that no other hittest can succeed during paint
-								clicked = false;
-
 							}
-							
 						}
 									
 						// Selection is cleared and reset on mouse click, but also when the arrow keys
@@ -2025,13 +2978,9 @@
 						
 						}
 
-						// We can either pass the selection painting function into the custom paint routine
-						// or have some other way of delaying text writing so that we draw text ontop of 
-						// selection, or just ignore it and always draw selection last.
-
-						// And overlay selection...
-						if (selected || isSelected(row,col)) {
-
+						if (layers) {
+							// Keep the edit logic for hover event though selections
+							// will be drawn as a separate layer
 							var hover = true;
 							if (selected && cell.hover) {
 								hover = cell.hover();
@@ -2042,19 +2991,40 @@
 								if (hit && !hover)
 									edit = true;
 							}
+						} else {
 
-							if (!selected || hover) {
-								// If its part of the selection but not the selected cell, or if it is the selected cell
-								// and hover is allowed, then draw the selection overlay (as opposed to the fulls screen
-								// edit overlay) over this individual cell.
+							// We can either pass the selection painting function into the custom paint routine
+							// or have some other way of delaying text writing so that we draw text ontop of 
+							// selection, or just ignore it and always draw selection last.
 
-								if (selected)
-									ctx.fillStyle = hexRgba("#FFFFFF",0.5);
-								else
-									ctx.fillStyle = hexRgba("#666666",0.5);
-							
-								ctx.fillRect(x,y,width,height);
-							}
+							// And overlay selection...
+							if (selected || isSelected(row,col)) {
+
+								var hover = true;
+								if (selected && cell.hover) {
+									hover = cell.hover();
+
+									// If this selection was caused by a click, then fire the edit event if the hover is 
+									// disabled (which at the moment indicates its a binary state change and can run with
+									// either enter or a click).
+									if (hit && !hover)
+										edit = true;
+								}
+
+								if (!selected || hover) {
+									// If its part of the selection but not the selected cell, or if it is the selected cell
+									// and hover is allowed, then draw the selection overlay (as opposed to the fulls screen
+									// edit overlay) over this individual cell.
+
+									if (selected)
+										ctx.fillStyle = hexRgba("#FFFFFF",0.5);
+									else
+										ctx.fillStyle = hexRgba("#666666",0.5);
+								
+									ctx.fillRect(x,y,width,height);
+								}
+
+							}							
 
 						}
 
@@ -2089,6 +3059,9 @@
 		
 							
 							if (typeof(val) == "number")
+								// FIXME
+								// This could be cached better to reduce the calls to toString() etc...
+
 								ctx.fillText(val.toString().substring(0,8), x+2, y+(height/2)+5);
 							else {
 								// This will overflow but always be cleaned up by the gridlines and overwritten
@@ -2102,32 +3075,32 @@
 					}
 
 					if (y+height >= viewHeight) {
-						if (lastRow == -1) {
-							lastRow = row;
-							lastY = y;
-						}	
-
 						break;
 					}
 				
 					y += height+gridlineSize;
 
 				}		
+
+				if (lastRow == -1) {
+					lastRow = row;
+					lastY = y;
+				}	
 			}
 
 
 			if (x+width >= viewWidth) {
-				if (lastCol == -1) {
-					lastCol = col;
-					lastX = x;
-				}
-
 				break;
 			}
 
 			x += width+gridlineSize;	
 
-		}	   
+		}	  
+
+		if (lastCol == -1) {
+			lastCol = col;
+			lastX = x;
+		} 
 		
 
 		if (edit || editing) {
@@ -2136,7 +3109,7 @@
 
 			//console.log("selected: ("+selectedX+","+selectedY+") ("+selectedWidth+","+selectedHeight+")");
 
-			// Edit 			
+			// Edit				
 			edit = false;	
 			var cell = cellFactory(selectedRow,selectedCol);
 
@@ -2217,7 +3190,7 @@
 		
 		// The edit box will be centred or snapped to an edge of the cell and aligned
 		if (editX+editWidth > render.width) {
-			flipRight = true;			 		
+			flipRight = true;					
 			editX = (x+width) - editDistance-editWidth;
 		}
 		
@@ -2274,7 +3247,7 @@
 	}
 
 	function doEdit(x,y,width,height,distance) {
-	  	
+		
 		$(editor).css('left',x);
 		$(editor).css('top',y);
 		
@@ -2296,19 +3269,36 @@
   
   
 	function draw() {
-		renderCtx.drawImage(buffer, 0, 0);
+
+		if (layers) {
+			renderCtx.drawImage(cellLayer.canvas,0,0);
+			renderCtx.drawImage(selectLayer.canvas,0,0);
+			renderCtx.drawImage(hoverLayer.canvas,0,0);
+		} else {
+			renderCtx.drawImage(buffer, 0, 0);
+		}
 	}
   
+	/*
 	function onTimer() {		
 		doRender();
 		setTimeout(onTimer,1000/fps);
 	}
-	
+	*/
 
-
+	// The order indirection is part of the sorting but it doesnt need to be turned off when sorting
+	// is disabled as it doesnt do much.
+	initOrder();
 	initHeaders();
 	initCells();
-
+	
+	// FIXME
+	// The init values initialises the array in a contiguous way so that the javascript engine
+	// can optimise its internal representation but it does not currently apply the correct inverse
+	// offsets for the column oriented one dimensional storage to call the cell.value() function
+	// required to initialise all fake values for ordering.
+	//initValues();
+	
 	// Set the bounding view div to be the entire size of the grid so we can scroll to 
 	// see all the data but hopefully only ever render whats visible.  We must calculate
 	// this after init, when weve set all the custom widths/heights and headers.
@@ -2324,6 +3314,43 @@
 	resize();
 
 	//setTimeout(onTimer,1000/fps);
+
+
+	// How many value per second for the permutable values !
+	var vps = 5;
+	function permute() {
+
+		for (var col=firstCol;col<lastCol;++col) {
+			for (var row=firstRow;row<lastRow;++row) {
+				var cell = cellFactory(row,col);
+				cell.value(true);
+			}
+		}
+
+
+		setTimeout(permute,1000/vps);
+	}
+
+
+
+	setTimeout(permute,1000/vps);
+
+
+	if (sorting) {
+		// Add a sort on the first column
+		var col2Sort = new Sort(SortTypes.ASCENDING,2);
+		col2Sort.groups = [hexRgba("#999999",0.5),hexRgba("#cccccc",0.0)];
+		sorts.push(col2Sort);
+
+		var col14Sort = new Sort(SortTypes.DESCENDING,14);
+		sorts.push(col14Sort);	
+
+		var col22sort = new Sort(SortTypes.NONE,22);
+		sorts.push(col22sort);
+
+		reorder();
+	}
+
 	
 	/*
 	function step() {
@@ -2334,21 +3361,21 @@
 	*/
 
 	function animate() {
-	    var frame = performance.now();
+		var frame = performance.now();
 		//var frame = null;
-	    // Minimum framerate before we skip rendering.
-	    
-	    var skip = 1000/5;
+		// Minimum framerate before we skip rendering.
+		
+		var skip = 1000/5;
 		var rate = 1000/30;
 
 		// The browser will pass the highres timestamp when the loop is called, but we can 
 		// provide our own timestamp to kick it off.
-	    function loop(now) {
+		function loop(now) {
 			//var now = performance.now();
 			//setTimeout(loop,1000/fps)
 			//setTimeout(function() {requestAnimationFrame(loop);},rate);
 			requestAnimationFrame(loop);
-			var delta = now - frame;	       
+			var delta = now - frame;		   
 			// Dont allow the frame rate to exceed fps...  and dont render if delta is too high
 			// since it can give the effect of sped up animation when switching tabs.
 			if (delta > skip) {
@@ -2359,9 +3386,9 @@
 				frame = now;
 			}
 			
-	    }
+		}
 
-	    loop(frame);
+		loop(frame);
 	}
 
 	animate();
